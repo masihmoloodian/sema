@@ -45,14 +45,14 @@ class SemaStore:
         query_embedding: list[float],
         top_k: int = 5,
         language: str | None = None,
-        chunk_type: str | None = None,
+        chunk_types: list[str] | None = None,
     ) -> list[dict]:
         """Semantic search. Returns search results with signatures only."""
         where: dict = {}
         if language:
             where["language"] = language
-        if chunk_type:
-            where["chunk_type"] = chunk_type
+        if chunk_types:
+            where["chunk_type"] = {"$in": chunk_types}
 
         results = self.collection.query(
             query_embeddings=[query_embedding],

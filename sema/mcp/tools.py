@@ -11,6 +11,9 @@ from ..store.chroma import SemaStore
 from ..indexer.embedder import Embedder
 from ..utils.repo_map import generate_repo_map
 
+# search_code only returns code symbols — never config/doc sections
+_CODE_CHUNK_TYPES = ["function", "class", "method", "interface", "struct", "module"]
+
 mcp = FastMCP("sema")
 _store: SemaStore | None = None
 _embedder: Embedder | None = None
@@ -52,7 +55,7 @@ def search_code(query: str, top_k: int = 5) -> str:
     embedder = _require_embedder()
 
     embedding = embedder.embed_one(query)
-    results = store.search(embedding, top_k=min(top_k, 10))
+    results = store.search(embedding, top_k=min(top_k, 10), chunk_types=_CODE_CHUNK_TYPES)
 
     if not results:
         return "No results found. The codebase may not be indexed. Run: sema index ."

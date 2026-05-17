@@ -28,11 +28,12 @@ class Chunk:
     parent_name: str | None = None   # for methods: the class name
 
     def embed_text(self) -> str:
-        """Text to embed — signature + docstring, not full body."""
+        """Text to embed — signature + context, not full body."""
         if self.chunk_type in ("section", "config"):
-            # For non-code chunks include leading body text for richer semantics
             return f"{self.chunk_type} {self.name}:\n{self.body[:400]}"
-        parts = [f"{self.chunk_type} {self.name}: {self.signature}"]
+        # For methods include the parent class so "AgentRunnerService runAgent" is searchable
+        qualified = f"{self.parent_name}.{self.name}" if self.parent_name else self.name
+        parts = [f"{self.chunk_type} {qualified}: {self.signature}"]
         if self.docstring:
             parts.append(self.docstring[:200])
         return "\n".join(parts)
