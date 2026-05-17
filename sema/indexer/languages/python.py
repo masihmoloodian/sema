@@ -14,13 +14,14 @@ PY_LANGUAGE = Language(tspy.language())
 
 def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     parser = Parser(PY_LANGUAGE)
-    tree = parser.parse(source.encode())
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
-    _walk(tree.root_node, source, file_path, chunks, parent_name=None)
+    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None)
     return chunks
 
 
-def _walk(node: Node, source: str, file: str, chunks: list, parent_name: str | None):
+def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None):
     if node.type in ("function_definition", "decorated_definition"):
         target = node
         if node.type == "decorated_definition":
@@ -51,8 +52,8 @@ def _walk(node: Node, source: str, file: str, chunks: list, parent_name: str | N
             _walk(child, source, file, chunks, parent_name)
 
 
-def _node_text(node: Node, source: str) -> str:
-    return source[node.start_byte:node.end_byte]
+def _node_text(node: Node, source: bytes) -> str:
+    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _get_name(node: Node) -> str:
@@ -62,7 +63,7 @@ def _get_name(node: Node) -> str:
     return "unknown"
 
 
-def _get_params(node: Node, source: str) -> str:
+def _get_params(node: Node, source: bytes) -> str:
     for child in node.children:
         if child.type == "parameters":
             text = _node_text(child, source)
@@ -70,7 +71,7 @@ def _get_params(node: Node, source: str) -> str:
     return ""
 
 
-def _get_return_annotation(node: Node, source: str) -> str | None:
+def _get_return_annotation(node: Node, source: bytes) -> str | None:
     found_arrow = False
     for child in node.children:
         if child.type == "->":
@@ -80,7 +81,7 @@ def _get_return_annotation(node: Node, source: str) -> str | None:
     return None
 
 
-def _get_docstring(node: Node, source: str) -> str | None:
+def _get_docstring(node: Node, source: bytes) -> str | None:
     for child in node.children:
         if child.type == "block":
             for stmt in child.children:
@@ -92,7 +93,7 @@ def _get_docstring(node: Node, source: str) -> str | None:
     return None
 
 
-def _make_function(node: Node, source: str, file: str, parent: str | None) -> Chunk:
+def _make_function(node: Node, source: bytes, file: str, parent: str | None) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     return_type = _get_return_annotation(node, source)
@@ -113,7 +114,7 @@ def _make_function(node: Node, source: str, file: str, parent: str | None) -> Ch
     )
 
 
-def _make_class(node: Node, source: str, file: str) -> Chunk:
+def _make_class(node: Node, source: bytes, file: str) -> Chunk:
     name = _get_name(node)
     start_line = node.start_point[0] + 1
     return Chunk(
@@ -130,7 +131,7 @@ def _make_class(node: Node, source: str, file: str) -> Chunk:
     )
 
 
-def _make_method(node: Node, source: str, file: str, parent_name: str) -> Chunk:
+def _make_method(node: Node, source: bytes, file: str, parent_name: str) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     return_type = _get_return_annotation(node, source)

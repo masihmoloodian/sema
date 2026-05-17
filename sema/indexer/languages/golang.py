@@ -14,22 +14,23 @@ GO_LANGUAGE = Language(tsgo.language())
 
 def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     parser = Parser(GO_LANGUAGE)
-    tree = parser.parse(source.encode())
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
     for child in tree.root_node.children:
         if child.type == "function_declaration":
-            chunks.append(_make_function(child, source, file_path))
+            chunks.append(_make_function(child, source_bytes, file_path))
         elif child.type == "method_declaration":
-            chunks.append(_make_method(child, source, file_path))
+            chunks.append(_make_method(child, source_bytes, file_path))
         elif child.type == "type_declaration":
-            chunk = _make_type(child, source, file_path)
+            chunk = _make_type(child, source_bytes, file_path)
             if chunk:
                 chunks.append(chunk)
     return chunks
 
 
-def _node_text(node: Node, source: str) -> str:
-    return source[node.start_byte:node.end_byte]
+def _node_text(node: Node, source: bytes) -> str:
+    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _get_name(node: Node) -> str:
@@ -39,14 +40,14 @@ def _get_name(node: Node) -> str:
     return "unknown"
 
 
-def _get_params(node: Node, source: str) -> str:
+def _get_params(node: Node, source: bytes) -> str:
     for child in node.children:
         if child.type == "parameter_list":
             return _node_text(child, source)
     return "()"
 
 
-def _get_result(node: Node, source: str) -> str | None:
+def _get_result(node: Node, source: bytes) -> str | None:
     params_seen = False
     for child in node.children:
         if child.type == "parameter_list":
@@ -59,7 +60,7 @@ def _get_result(node: Node, source: str) -> str | None:
     return None
 
 
-def _make_function(node: Node, source: str, file: str) -> Chunk:
+def _make_function(node: Node, source: bytes, file: str) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     result = _get_result(node, source)
@@ -79,7 +80,7 @@ def _make_function(node: Node, source: str, file: str) -> Chunk:
     )
 
 
-def _make_method(node: Node, source: str, file: str) -> Chunk:
+def _make_method(node: Node, source: bytes, file: str) -> Chunk:
     name = _get_name(node)
     receiver = None
     params = ""
@@ -111,7 +112,7 @@ def _make_method(node: Node, source: str, file: str) -> Chunk:
     )
 
 
-def _make_type(node: Node, source: str, file: str) -> Chunk | None:
+def _make_type(node: Node, source: bytes, file: str) -> Chunk | None:
     for child in node.children:
         if child.type == "type_spec":
             name_node = child.child_by_field_name("name")

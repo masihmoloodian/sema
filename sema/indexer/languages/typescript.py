@@ -14,13 +14,14 @@ TS_LANGUAGE = Language(tsts.language_typescript())
 
 def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     parser = Parser(TS_LANGUAGE)
-    tree = parser.parse(source.encode())
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
-    _walk(tree.root_node, source, file_path, chunks, parent_name=None)
+    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None)
     return chunks
 
 
-def _walk(node: Node, source: str, file: str, chunks: list, parent_name: str | None):
+def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None):
     if node.type == "function_declaration":
         chunks.append(_make_function(node, source, file, parent_name))
 
@@ -48,8 +49,8 @@ def _walk(node: Node, source: str, file: str, chunks: list, parent_name: str | N
             _walk(child, source, file, chunks, parent_name)
 
 
-def _node_text(node: Node, source: str) -> str:
-    return source[node.start_byte:node.end_byte]
+def _node_text(node: Node, source: bytes) -> str:
+    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _get_identifier(node: Node) -> str:
@@ -59,7 +60,7 @@ def _get_identifier(node: Node) -> str:
     return "unknown"
 
 
-def _get_params(node: Node, source: str) -> str:
+def _get_params(node: Node, source: bytes) -> str:
     for child in node.children:
         if child.type == "formal_parameters":
             text = _node_text(child, source)
@@ -67,17 +68,17 @@ def _get_params(node: Node, source: str) -> str:
     return ""
 
 
-def _get_return_type(node: Node, source: str) -> str | None:
+def _get_return_type(node: Node, source: bytes) -> str | None:
     for child in node.children:
         if child.type == "type_annotation":
             return _node_text(child, source).lstrip(": ")
     return None
 
 
-def _get_jsdoc(node: Node, source: str) -> str | None:
+def _get_jsdoc(node: Node, source: bytes) -> str | None:
     """Look for JSDoc comment immediately before this node."""
     start = node.start_byte
-    preceding = source[max(0, start - 500):start].strip()
+    preceding = source[max(0, start - 500):start].decode("utf-8", errors="replace").strip()
     if preceding.endswith("*/"):
         doc_start = preceding.rfind("/**")
         if doc_start != -1:
