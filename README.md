@@ -200,14 +200,25 @@ Create a `CLAUDE.md` file in your project root. Without this, Claude may still f
 
 ## Codebase navigation — use sema MCP tools first
 
-Always use sema tools before reading files:
-1. `search_code("query")` — find relevant functions/classes by description
-2. `repo_map()` — get architecture overview at the start of a session
-3. `get_code("symbolName")` — read a function's full source body
-4. `find_usages("symbolName")` — find where something is called or imported
-5. `explain_file("path/to/file.ts")` — summarise a file without reading it
+This project is indexed by sema. Always use sema tools before reading files.
 
-Do NOT use Bash find/grep or Read to explore the codebase until sema returns no results.
+### Which tool to use
+
+**Backend / logic tasks** ("how does auth work?", "where is X validated?"):
+1. `search_code("query")` — find relevant functions/classes by natural language
+2. `get_code("symbolName")` — read one function's full body
+3. `find_usages("symbolName")` — find where something is used
+
+**Frontend / UI tasks** ("add footer to landing page", "update the nav"):
+1. `repo_map()` — lists all files including page.tsx and layout.tsx — start here
+2. `explain_file("apps/web/src/app/page.tsx")` — inspect a specific page
+3. `search_code()` only for hooks and logic, not for finding which file to edit
+
+**Session start / architecture questions:**
+1. `repo_map()` — always call this first for a full picture of the codebase
+
+Do NOT use Bash find/grep or Read to explore the codebase until sema returns
+no results. sema is faster and uses far fewer tokens.
 ```
 
 ---
