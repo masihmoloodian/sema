@@ -1,10 +1,12 @@
 # Sema
 
-**Semantic codebase indexer and MCP server for Claude Code.**
+**Speed up Claude Code on large codebases. Stop wasting tokens on file navigation.**
 
-sema was built to solve a real pain: every time you start a Claude Code session, Claude has zero knowledge of your codebase. It wastes thousands of tokens running `find`, reading full files, and exploring directories before it can help with anything. On a large project, Claude can burn 10,000–25,000 tokens just *navigating* before writing a single line.
+Sema is a semantic code indexer and MCP server for Claude Code. It indexes your entire codebase locally — every function, class, and method — and gives Claude a search API so it never has to read files blindly again.
 
-sema fixes this by indexing your codebase once — parsing every function, class, and method into semantic chunks, embedding them locally, and serving them through an MCP server. Claude calls `search_code("query")` instead of reading files blindly.
+Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
+
+Index once. Claude searches forever.
 
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [Disclaimer](#disclaimer) section.
 
@@ -26,6 +28,7 @@ sema fixes this by indexing your codebase once — parsing every function, class
 - [Configuration](#configuration)
 - [When to re-index](#when-to-re-index)
 - [Limitations](#limitations)
+- [FAQ](#faq)
 - [Disclaimer](#disclaimer)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -38,7 +41,7 @@ sema fixes this by indexing your codebase once — parsing every function, class
 
 Every Claude Code session starts cold. Claude has no memory of your codebase, so it explores — running shell commands, reading files one by one, building a mental model from scratch. This costs tokens, takes time, and happens again every single session.
 
-The root problem: **Claude navigates by reading, not by searching.**
+The root problem: **Claude Code navigates by reading, not by searching.**
 
 sema gives Claude a search index. Instead of:
 ```
@@ -461,6 +464,28 @@ Known limitations in the current version (v0.1.x):
 - **Single project per server** — one `sema serve` process serves one project root
 - **Model fixed at index time** — changing the embedding model requires a full re-index
 - **Tested on macOS only** — Apple Silicon M4 Pro, macOS 26.4; Linux likely works; Windows untested
+
+---
+
+## FAQ
+
+**Why is Claude Code so slow at the start of a session?**
+Claude Code has no persistent memory of your codebase between sessions. Every new chat starts cold — Claude has to run `find`, read files, and explore directories to build context before it can help. On a project with 50+ files this costs thousands of tokens and tens of seconds before Claude writes a single line of code. Sema solves this by pre-indexing your codebase so Claude can search instead of explore.
+
+**Why does Claude Code use so many tokens?**
+The main culprit is file navigation. Without an index, Claude reads entire files to find the one function it needs. A single "how does auth work?" question can consume 9,000+ tokens just in file reads. Sema's `search_code()` returns only the relevant signatures (~150 tokens), and `get_code()` fetches only the exact function body needed (~300 tokens).
+
+**How do I speed up Claude Code on a large codebase?**
+Install Sema, run `sema index .` once in your project, then `sema init` to register it with Claude Code. Add a `CLAUDE.md` file that tells Claude to call `search_code()` first. From that point on Claude searches your index instead of reading files — typically 5–10× fewer tool calls per question.
+
+**Does sema send my code to any external service?**
+No. Sema runs entirely on your machine. The embedding model (`all-MiniLM-L6-v2`) is downloaded once (~80MB) and cached locally. No API keys, no internet connection required after setup, no data leaves your machine.
+
+**What is an MCP server for Claude Code?**
+MCP (Model Context Protocol) is the standard that Claude Code uses to call external tools. Sema registers itself as a local MCP server — Claude Code connects to it over stdio and gains five new tools: `search_code`, `get_code`, `find_usages`, `repo_map`, and `explain_file`. These tools give Claude structured access to your codebase without reading raw files.
+
+**Does sema work with TypeScript, Python, Go, and other languages?**
+Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go (symbol-level granularity). All other languages and formats — including Rust, Java, Ruby, Markdown, JSON, YAML, CSS, SQL, and more — are indexed via text chunking, which makes them searchable even without symbol extraction.
 
 ---
 
