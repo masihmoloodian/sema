@@ -55,7 +55,7 @@ search_code("user authentication")          # 10 signatures, ~150 tokens
 get_code("forgotPassword")                  # exact function body, ~300 tokens
 ```
 
-Same answer. 20× fewer tokens. No file reading needed.
+Same answer. 10× fewer tokens. No file reading needed.
 
 ---
 
