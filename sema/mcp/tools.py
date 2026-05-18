@@ -36,9 +36,10 @@ def _build_bm25(store: SemaStore) -> BM25Index | None:
     ids, metadatas = store.get_all_for_bm25()
     if not ids:
         return None
-    # BM25 text: name + signature + body snippet — richer than embed_text for keyword matching
+    # BM25 text: name + signature only — body causes too many false positives because
+    # common tokens like "user" appear in every function that touches the domain model.
     texts = [
-        f"{m['name']} {m['signature']} {m.get('body', '')[:400]}"
+        f"{m['name']} {m['signature']}"
         for m in metadatas
     ]
     return BM25Index(ids, texts, metadatas)
@@ -51,20 +52,23 @@ def _rrf_merge(
     k: int = 60,
 ) -> list[dict]:
     """
-    Reciprocal Rank Fusion: score(d) = Σ 1/(k + rank(d)).
-    k=60 is the standard constant — dampens the impact of very high ranks.
+    Asymmetric Reciprocal Rank Fusion.
+
+    Semantic gets 2× weight vs BM25 — ensures BM25 can boost exact-name matches
+    without overriding strong semantic signal on descriptive natural-language queries.
+    Formula: score(d) = 2/(k+rank) for semantic + 1/(k+rank) for BM25.
     """
     rrf_scores: dict[str, float] = {}
     chunks: dict[str, dict] = {}
 
     for rank, r in enumerate(semantic):
         id_ = r["id"]
-        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 1.0 / (k + rank + 1)
+        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 2.0 / (k + rank + 1)  # 2× weight
         chunks[id_] = r
 
     for rank, r in enumerate(bm25):
         id_ = r["id"]
-        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 1.0 / (k + rank + 1)
+        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 1.0 / (k + rank + 1)  # 1× weight
         if id_ not in chunks:
             chunks[id_] = r
 
@@ -118,7 +122,13 @@ def search_code(query: str, top_k: int = 5) -> str:
 
     if _bm25:
         bm25_results = _bm25.search(query, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
-        results = _rrf_merge(semantic, bm25_results, top_k=top_k)
+        # Only mix BM25 when it has confident hits — strong score means the query
+        # contains exact symbol names or specific keywords. Low scores mean the
+        # query is broad natural language where BM25 just adds noise.
+        if bm25_results and bm25_results[0]["score"] >= 5.0:
+            results = _rrf_merge(semantic, bm25_results, top_k=top_k)
+        else:
+            results = semantic[:top_k]
     else:
         results = semantic[:top_k]
 

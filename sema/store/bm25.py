@@ -9,14 +9,34 @@ Reciprocal Rank Fusion (RRF) in tools.py.
 import re
 from rank_bm25 import BM25Okapi
 
+# Common English navigation words that appear in natural-language queries but match
+# too many unrelated function names (find→findById, add→addMember, get→getUser…).
+# Stripping them from BM25 queries prevents noise while keeping symbol-name matches.
+_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "to", "in", "on", "of", "for",
+    "with", "by", "from", "at", "is", "it", "its", "be", "as", "are",
+    "this", "that", "into", "via", "using", "use", "how", "do", "does",
+    # common imperative words that are also ubiquitous function name prefixes
+    "get", "set", "add", "find", "list", "make", "show", "run",
+    "create", "delete", "remove", "update", "fetch", "load", "save",
+    "handle", "build", "init", "check", "send", "read", "write",
+    # architecture words that match many files but carry no selector value
+    "endpoint", "controller", "service", "handler", "method", "function",
+    "class", "module", "component", "route", "api", "request", "response",
+    "input", "output", "param", "params", "field", "type", "value",
+}
 
-def _tokenize(text: str) -> list[str]:
+
+def _tokenize(text: str, remove_stopwords: bool = False) -> list[str]:
     """Tokenize for BM25 — splits camelCase so 'forgotPassword' matches 'forgot password'."""
     # Split camelCase: forgotPassword → forgot Password
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     # Split PascalCase runs: HTMLParser → HTML Parser
     text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", text)
-    return re.findall(r"[a-zA-Z0-9]+", text.lower())
+    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    if remove_stopwords:
+        tokens = [t for t in tokens if t not in _STOP_WORDS]
+    return tokens
 
 
 class BM25Index:
@@ -25,6 +45,7 @@ class BM25Index:
     def __init__(self, ids: list[str], texts: list[str], metadatas: list[dict]):
         self._ids = ids
         self._meta = {id_: meta for id_, meta in zip(ids, metadatas)}
+        # Corpus is indexed without stop-word removal so symbol names stay intact
         tokenized = [_tokenize(t) for t in texts]
         self._bm25 = BM25Okapi(tokenized)
 
@@ -35,7 +56,9 @@ class BM25Index:
         chunk_types: list[str] | None = None,
     ) -> list[dict]:
         """Return top_k results ranked by BM25 score, optionally filtered by chunk_type."""
-        tokens = _tokenize(query)
+        # Remove stop words from the query only — keeps natural-language queries from
+        # matching every function named get*/find*/add* etc.
+        tokens = _tokenize(query, remove_stopwords=True)
         raw_scores = self._bm25.get_scores(tokens)
 
         ranked = sorted(

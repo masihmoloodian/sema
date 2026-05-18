@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 ChunkType = Literal["function", "class", "method", "interface", "struct", "module", "section", "config"]
@@ -31,11 +32,30 @@ class Chunk:
         """Text to embed — signature + context, not full body."""
         if self.chunk_type in ("section", "config"):
             return f"{self.chunk_type} {self.name}:\n{self.body[:400]}"
-        # For methods include the parent class so "AgentRunnerService runAgent" is searchable
+
+        # Qualified name: "AuthService.forgotPassword" makes class context searchable
         qualified = f"{self.parent_name}.{self.name}" if self.parent_name else self.name
         parts = [f"{self.chunk_type} {qualified}: {self.signature}"]
+
+        # Module hint from file path: "apps/api/src/auth/auth.service.ts" → "auth"
+        # Helps queries like "auth service update" find methods whose names don't contain "auth"
+        module = Path(self.file).stem.split(".")[0]
+        if module and module.lower() not in qualified.lower():
+            parts.append(f"in {module}")
+
         if self.docstring:
             parts.append(self.docstring[:200])
+
+        # First 4 body lines — captures NestJS decorators (@Post, @Injectable, @IsEmail)
+        # and early statements that reveal what a function does.
+        # Skipped for class/struct/interface: their bodies are schema declarations
+        # (TypeORM @Column, field types) which add noise rather than signal.
+        if self.body and self.chunk_type in ("function", "method"):
+            lines = [ln.strip() for ln in self.body.splitlines() if ln.strip()]
+            preview = " ".join(lines[:4])
+            if preview:
+                parts.append(preview[:250])
+
         return "\n".join(parts)
 
     def to_search_result(self) -> dict:
