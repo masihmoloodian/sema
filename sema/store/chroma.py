@@ -98,6 +98,11 @@ class SemaStore:
         results = self.collection.get(include=["metadatas"])
         return results["metadatas"]
 
+    def get_all_for_bm25(self) -> tuple[list[str], list[dict]]:
+        """Get all ids + metadata — for building the BM25 index at startup."""
+        results = self.collection.get(include=["metadatas"])
+        return results["ids"], results["metadatas"]
+
     def delete_by_file(self, file_path: str) -> None:
         """Remove all chunks for a file — for incremental re-index."""
         self.collection.delete(where={"file": file_path})

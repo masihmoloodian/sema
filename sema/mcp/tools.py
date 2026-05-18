@@ -4,10 +4,15 @@ MCP tool implementations.
 Each tool returns the minimum tokens needed for Claude to make
 its next decision. Full source is never returned unless explicitly
 requested via get_code().
+
+search_code and find_usages use hybrid search: semantic (vector) + BM25 (keyword)
+merged with Reciprocal Rank Fusion. This covers both conceptual queries
+("token validation logic") and exact-name queries ("validateToken").
 """
 
 from mcp.server.fastmcp import FastMCP
 from ..store.chroma import SemaStore
+from ..store.bm25 import BM25Index
 from ..indexer.embedder import Embedder
 from ..utils.repo_map import generate_repo_map
 
@@ -17,12 +22,63 @@ _CODE_CHUNK_TYPES = ["function", "class", "method", "interface", "struct", "modu
 mcp = FastMCP("sema")
 _store: SemaStore | None = None
 _embedder: Embedder | None = None
+_bm25: BM25Index | None = None
 
 
 def init_tools(store: SemaStore, embedder: Embedder) -> None:
-    global _store, _embedder
+    global _store, _embedder, _bm25
     _store = store
     _embedder = embedder
+    _bm25 = _build_bm25(store)
+
+
+def _build_bm25(store: SemaStore) -> BM25Index | None:
+    ids, metadatas = store.get_all_for_bm25()
+    if not ids:
+        return None
+    # BM25 text: name + signature + body snippet — richer than embed_text for keyword matching
+    texts = [
+        f"{m['name']} {m['signature']} {m.get('body', '')[:400]}"
+        for m in metadatas
+    ]
+    return BM25Index(ids, texts, metadatas)
+
+
+def _rrf_merge(
+    semantic: list[dict],
+    bm25: list[dict],
+    top_k: int,
+    k: int = 60,
+) -> list[dict]:
+    """
+    Reciprocal Rank Fusion: score(d) = Σ 1/(k + rank(d)).
+    k=60 is the standard constant — dampens the impact of very high ranks.
+    """
+    rrf_scores: dict[str, float] = {}
+    chunks: dict[str, dict] = {}
+
+    for rank, r in enumerate(semantic):
+        id_ = r["id"]
+        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 1.0 / (k + rank + 1)
+        chunks[id_] = r
+
+    for rank, r in enumerate(bm25):
+        id_ = r["id"]
+        rrf_scores[id_] = rrf_scores.get(id_, 0.0) + 1.0 / (k + rank + 1)
+        if id_ not in chunks:
+            chunks[id_] = r
+
+    sorted_ids = sorted(rrf_scores, key=lambda x: rrf_scores[x], reverse=True)[:top_k]
+
+    # Normalize scores to 0–1 for display
+    max_score = rrf_scores[sorted_ids[0]] if sorted_ids else 1.0
+    results = []
+    for id_ in sorted_ids:
+        r = dict(chunks[id_])
+        r["score"] = rrf_scores[id_] / max_score
+        results.append(r)
+
+    return results
 
 
 def _require_store() -> SemaStore:
@@ -54,8 +110,17 @@ def search_code(query: str, top_k: int = 5) -> str:
     store = _require_store()
     embedder = _require_embedder()
 
+    top_k = min(top_k, 10)
+    fetch_k = min(top_k * 3, 30)  # over-fetch from each source before merging
+
     embedding = embedder.embed_one(query)
-    results = store.search(embedding, top_k=min(top_k, 10), chunk_types=_CODE_CHUNK_TYPES)
+    semantic = store.search(embedding, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
+
+    if _bm25:
+        bm25_results = _bm25.search(query, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
+        results = _rrf_merge(semantic, bm25_results, top_k=top_k)
+    else:
+        results = semantic[:top_k]
 
     if not results:
         return "No results found. The codebase may not be indexed. Run: sema index ."
@@ -113,7 +178,7 @@ def repo_map() -> str:
 def find_usages(symbol_name: str) -> str:
     """
     Find all places where a function or class is referenced.
-    Uses semantic search — finds call sites, imports, and type references.
+    Uses hybrid search (BM25 + semantic) — finds call sites, imports, and type references.
 
     Args:
         symbol_name: The function or class name to find usages of.
@@ -121,20 +186,29 @@ def find_usages(symbol_name: str) -> str:
     store = _require_store()
     embedder = _require_embedder()
 
-    embedding = embedder.embed_one(f"calls uses imports {symbol_name}")
-    results = store.search(embedding, top_k=10)
+    results: list[dict] = []
 
-    usages = [
-        r for r in results
-        if symbol_name.lower() in r["signature"].lower()
-        or symbol_name.lower() in r["id"].lower()
-    ]
+    if _bm25:
+        # BM25 finds exact name occurrences in bodies and signatures
+        bm25_results = _bm25.search(symbol_name, top_k=20)
+        # Exclude the definition itself — keep only callers/references
+        results = [r for r in bm25_results if r["name"].lower() != symbol_name.lower()][:10]
 
-    if not usages:
+    if not results:
+        # Fallback: semantic search
+        embedding = embedder.embed_one(f"calls uses imports {symbol_name}")
+        sem_results = store.search(embedding, top_k=10)
+        results = [
+            r for r in sem_results
+            if symbol_name.lower() in r["signature"].lower()
+            or symbol_name.lower() in r["id"].lower()
+        ]
+
+    if not results:
         return f"No usages of '{symbol_name}' found in index."
 
     lines = [f"Usages of '{symbol_name}':\n"]
-    for u in usages:
+    for u in results:
         lines.append(
             f"  {u['file']}::{u['name']}  [line {u['start_line']}]\n"
             f"    {u['signature']}\n"
