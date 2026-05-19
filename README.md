@@ -311,29 +311,26 @@ cd your-project
 Create a `CLAUDE.md` file in your project root. Without this, Claude may still fall back to reading files directly:
 
 ```markdown
-# CLAUDE.md
+## Codebase navigation
 
-## Codebase navigation — use sema MCP tools first
-
-This project is indexed by sema. Always use sema tools before reading files.
+This project is indexed by sema. Use sema tools to locate code before reading files.
 
 ### Which tool to use
 
-**Backend / logic tasks** ("how does auth work?", "where is X validated?"):
-1. `search_code("query")` — find relevant functions/classes by natural language
-2. `get_code("symbolName")` — read one function's full body
-3. `find_usages("symbolName")` — find where something is used
+| Goal | Tool |
+|---|---|
+| Find a function, class, or method | `search_code("natural language description")` |
+| Read the full body of a known symbol | `get_code("exactSymbolName")` |
+| Find where a symbol is called or referenced | `find_usages("symbolName")` |
+| Understand what a file exports | `explain_file("path/to/file.ts")` |
+| Understand the overall architecture | `repo_map()` |
 
-**Frontend / UI tasks** ("add footer to landing page", "update the nav"):
-1. `repo_map()` — lists all files including page.tsx and layout.tsx — start here
-2. `explain_file("apps/web/src/app/page.tsx")` — inspect a specific page
-3. `search_code()` only for hooks and logic, not for finding which file to edit
+### Rules
 
-**Session start / architecture questions:**
-1. `repo_map()` — always call this first for a full picture of the codebase
-
-Do NOT use Bash find/grep or Read to explore the codebase until sema returns
-no results. sema is faster and uses far fewer tokens.
+1. **Always call `search_code()` before using Bash find/grep or Read to explore.**
+2. If `search_code()` returns relevant results, use `get_code()` for the full body — do not Read the whole file.
+3. If sema returns no results or the results look wrong, fall back to normal file navigation — the index may be stale or the symbol may not exist.
+4. Only call `repo_map()` when you genuinely need an architecture overview — it costs ~400–800 tokens.
 ```
 
 ---
