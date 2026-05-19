@@ -31,6 +31,7 @@ Index once. Claude searches forever.
 - [Quick start](#quick-start)
 - [Troubleshooting](#troubleshooting)
 - [Managing sema](#managing-sema)
+  - [Update sema](#update-sema-to-the-latest-version)
 - [CLI reference](#cli-reference)
 - [MCP tools](#mcp-tools)
 - [Supported languages](#supported-languages)
@@ -430,6 +431,27 @@ sema init --uninstall
 ```
 
 To re-activate, run `sema init` again.
+
+### Update sema to the latest version
+
+```bash
+cd /path/to/sema
+
+# Pull the latest changes
+git pull
+
+# Re-install (only needed if dependencies changed)
+pip install -e ".[dev]"
+# or with uv:
+uv pip install -e ".[dev]"
+
+# Check the version
+sema --version
+```
+
+Your existing project indexes are untouched — no need to re-run `sema index .` unless the release notes say the index format changed.
+
+> Once sema is published to PyPI, updating will be just `pip install --upgrade sema`.
 
 ### Fully remove sema from your machine
 
