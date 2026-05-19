@@ -140,10 +140,13 @@ def init(all_tools: bool, uninstall: bool, dry_run: bool):
 @main.command()
 @click.argument("query")
 @click.option("--top-k", default=5, help="Number of results")
-def search(query: str, top_k: int):
+@click.option("--all-types", is_flag=True, help="Include docs/config sections (default: code only)")
+def search(query: str, top_k: int, all_types: bool):
     """Search the codebase index. Useful for testing without Claude."""
     from .store.chroma import SemaStore
+    from .store.bm25 import BM25Index
     from .indexer.embedder import Embedder
+    from .mcp.tools import _CODE_CHUNK_TYPES, _rrf_merge
 
     project_root = Path(".").resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
@@ -154,8 +157,25 @@ def search(query: str, top_k: int):
 
     store = SemaStore(index_path)
     embedder = Embedder()
+
+    chunk_types = None if all_types else _CODE_CHUNK_TYPES
+    fetch_k = min(top_k * 3, 30)
+
     embedding = embedder.embed_one(query)
-    results = store.search(embedding, top_k=top_k)
+    semantic = store.search(embedding, top_k=fetch_k, chunk_types=chunk_types)
+
+    # Build BM25 and merge
+    ids, metadatas = store.get_all_for_bm25()
+    if ids:
+        texts = [f"{m['name']} {m['signature']}" for m in metadatas]
+        bm25 = BM25Index(ids, texts, metadatas)
+        bm25_results = bm25.search(query, top_k=fetch_k, chunk_types=chunk_types)
+        if bm25_results and bm25_results[0]["score"] >= 5.0:
+            results = _rrf_merge(semantic, bm25_results, top_k=top_k)
+        else:
+            results = semantic[:top_k]
+    else:
+        results = semantic[:top_k]
 
     if not results:
         console.print("No results found.")
