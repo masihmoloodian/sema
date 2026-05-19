@@ -342,50 +342,59 @@ no results. sema is faster and uses far fewer tokens.
 
 ### sema not listed in `/mcp`
 
-If you run `/mcp` in Claude Code and sema doesn't appear at all, the most common cause is that `sema init` wrote the config to the wrong location. The fix:
+**Check 1 — Did you run `sema init` from the right directory?**
+
+`sema init` writes to `.claude/settings.json` in your *current working directory*. Claude Code only reads the `.claude/settings.json` that lives in the root of the project it has open. If you ran `sema init` from the wrong directory, the config landed in the wrong place.
+
+Fix: `cd` to the project root that Claude Code has open, then re-run:
 
 ```bash
-cd your-project
-sema init --global
+cd your-project   # the directory Claude Code is opened on
+sema init
 ```
 
-`--global` writes to `~/.claude/settings.json` instead of `.claude/settings.json` in the project. Claude Code always loads the global config regardless of which project is open, so sema will show up in every session.
+**Check 2 — Did you reload VS Code?**
 
-After running it, reload VS Code (`Cmd+Shift+P` → `Developer: Reload Window`) and check `/mcp` again.
+After `sema init` writes the config, Claude Code needs a reload to pick it up:
 
-### Verify what `sema init` wrote
+`Cmd+Shift+P` → `Developer: Reload Window`
+
+Then open a new chat and type `/mcp`. You should see `sema ✓ connected`.
+
+**Check 3 — Inspect the config that was written**
 
 ```bash
-# Show what the project-level config contains
-cat .claude/settings.json
-
-# Show what the global config contains
-cat ~/.claude/settings.json
+cat your-project/.claude/settings.json
 ```
 
-You should see something like:
+It should look like this:
 
 ```json
 {
   "mcpServers": {
     "sema": {
-      "command": "/path/to/.venv/bin/sema",
+      "command": "/absolute/path/to/.venv/bin/sema",
       "args": ["serve", "--project", "/absolute/path/to/your-project"]
     }
   }
 }
 ```
 
-If `command` points to a path that doesn't exist, re-run `sema init` (or `sema init --global`) from within the activated virtual environment so the correct binary path is written.
+Two things to verify:
+- `command` — the path must point to an existing file. If it doesn't (`ls` it to confirm), re-run `sema init` with the venv activated so the correct binary path is detected.
+- `args[1]` (`--project`) — must be the absolute path to the project root Claude Code has open.
 
-### Dry-run to preview without writing
+**Check 4 — Verify the binary path manually**
 
 ```bash
-sema init --dry-run
-sema init --global --dry-run
+# Does the binary exist?
+ls $(cat your-project/.claude/settings.json | python3 -c "import sys,json; print(json.load(sys.stdin)['mcpServers']['sema']['command'])")
+
+# Can it start the server?
+/path/to/.venv/bin/sema serve --project /path/to/your-project
 ```
 
-This prints what would be written without touching any files.
+If the `serve` command errors, that's the root cause — fix it, then `sema init` again.
 
 ---
 
@@ -402,7 +411,7 @@ This deletes the vector database and metadata. Run `sema index .` to rebuild.
 
 ### Deactivate sema for a project (keep index)
 
-Remove sema from Claude Code config (checks both project and global locations):
+Remove sema from the project's Claude Code config:
 
 ```bash
 cd your-project
@@ -438,8 +447,7 @@ sema index .                     Index the current directory
 sema index . --reset             Delete existing index and re-index from scratch
 sema index ./path                Index a specific path
 sema init                        Register sema as MCP server (writes .claude/settings.json)
-sema init --global               Register in ~/.claude/settings.json (fixes "not in /mcp" issues)
-sema init --uninstall            Remove sema from all Claude Code configs
+sema init --uninstall            Remove sema from Claude Code config
 sema init --dry-run              Show what init would do without making changes
 sema search "query"              Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10  Return more results
