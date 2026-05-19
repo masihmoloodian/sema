@@ -4,6 +4,8 @@
 
 Sema is a semantic code indexer and MCP server for Claude Code. It indexes your entire codebase locally — every function, class, and method — and gives Claude a search API so it never has to read files blindly again.
 
+Works with **Claude Code CLI** and the **Claude Code VS Code extension**.
+
 Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
 Index once. Claude searches forever.
@@ -235,7 +237,7 @@ The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "wi
 ## Requirements
 
 - Python 3.11 or higher
-- Claude Code (VS Code extension or CLI)
+- Claude Code — [CLI](https://docs.anthropic.com/en/docs/claude-code) or [VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
 - ~80MB disk space for the embedding model (downloaded once, cached globally)
 - No Docker, no external APIs, no GPU — runs entirely on your machine
 
