@@ -180,10 +180,20 @@ def _make_interface(node: Node, source: str, file: str) -> Chunk:
     )
 
 
+def _get_arrow_name(decl_node: Node) -> str:
+    """Extract variable name from a const/let/var declaration node."""
+    for child in decl_node.children:
+        if child.type == "variable_declarator":
+            for grandchild in child.children:
+                if grandchild.type == "identifier":
+                    return grandchild.text.decode()
+    return "unknown"
+
+
 def _make_arrow_fn(
     decl_node: Node, fn_node: Node, source: str, file: str, parent: str | None
 ) -> Chunk:
-    name = _get_identifier(decl_node)
+    name = _get_arrow_name(decl_node)
     params = _get_params(fn_node, source)
     return_type = _get_return_type(fn_node, source)
     signature = f"{name}({params}){': ' + return_type if return_type else ''}"

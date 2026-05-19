@@ -154,6 +154,18 @@ def test_unregistered_extension_returns_empty(tmp_path):
     assert parse_file(f, tmp_path) == []
 
 
+def test_parse_typed_arrow_function_name(tmp_path):
+    # Typed arrow: `const foo: (x: T) => R = (x) => {...}` — name must not be "unknown"
+    f = tmp_path / "typed.ts"
+    f.write_text(
+        "export const createLinter: (schema: string) => boolean = (schema) => true;\n"
+    )
+    chunks = parse_file(f, tmp_path)
+    assert len(chunks) == 1
+    assert chunks[0].name == "createLinter"
+    assert chunks[0].name != "unknown"
+
+
 def test_register_adds_extension(tmp_path):
     from sema.store.schema import Chunk
 
