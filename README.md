@@ -311,7 +311,12 @@ cd your-project
 #    Open a new chat in Claude Code and type /mcp
 #    You should see:  Local (1)  sema  ✓ Connected
 
-# 6. Add a CLAUDE.md to your project (see Configuration section)
+# 6. (Optional) Keep the index up to date automatically
+#    Run this in a separate terminal while you work:
+/path/to/sema/venv/bin/sema watch .
+#    Ctrl+C to stop
+
+# 7. Add a CLAUDE.md to your project (see Configuration section)
 #    This tells Claude to use sema tools first
 ```
 
@@ -616,11 +621,22 @@ Commit `.sema/meta.json` if you want teammates to see index stats. The index its
 
 ## When to re-index
 
+The easiest option — run `sema watch` in a terminal while you work. It re-indexes any file the moment you save it, so the index is always current:
+
 ```bash
-# After adding new files or large refactors
+sema watch
+# 14:22:31  indexed   src/auth/auth.service.ts  (12 chunks)
+# 14:22:45  indexed   src/users/users.service.ts  (8 chunks)
+# Ctrl+C to stop
+```
+
+If you prefer manual re-indexing:
+
+```bash
+# After large refactors or many file changes
 sema index . --reset
 
-# After small changes (new functions in existing files)
+# After adding a few new files
 sema index .
 ```
 
@@ -635,8 +651,6 @@ You do **not** need to re-index when:
 
 Known limitations in the current version (v0.1.x):
 
-- **No incremental indexing** — changed files require a full `--reset` re-index
-- **No file watcher** — sema does not automatically detect file changes; re-index manually after code changes
 - **AST-aware parsers for TypeScript, Python, Go only** — Ruby, Rust, Java, C#, and others fall back to generic text chunking (searchable, but no symbol-level granularity)
 - **No call graph** — sema knows what each function does, but not which functions call which; Claude infers this from bodies
 - **`find_usages` is approximate** — uses semantic similarity, not AST-level reference tracking; may miss some call sites
@@ -773,7 +787,6 @@ The embedding, storage, and search pipeline are fully language-agnostic — you 
 - Add support for a new language (Rust, Java, Ruby, C#)
 - Improve `find_usages` with a grep-based exact match fallback
 - Add `--verbose` output to `sema index` showing each file as it's processed
-- Write `sema watch` using the `watchdog` library
 - Test sema on Linux or Windows and report/fix issues
 - Improve search quality for a specific code pattern you've found lacking
 
