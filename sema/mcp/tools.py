@@ -5,11 +5,12 @@ Each tool returns the minimum tokens needed for Claude to make
 its next decision. Full source is never returned unless explicitly
 requested via get_code().
 
-search_code and find_usages use hybrid search: semantic (vector) + BM25 (keyword)
-merged with Reciprocal Rank Fusion. This covers both conceptual queries
-("token validation logic") and exact-name queries ("validateToken").
+search_code uses hybrid search: semantic (vector) + BM25 (keyword) merged with
+Reciprocal Rank Fusion. find_usages uses exact grep across all project files
+so it finds call sites inside bodies, not just matching signatures.
 """
 
+from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from ..store.chroma import SemaStore
 from ..store.bm25 import BM25Index
@@ -23,13 +24,15 @@ mcp = FastMCP("sema")
 _store: SemaStore | None = None
 _embedder: Embedder | None = None
 _bm25: BM25Index | None = None
+_project_root: "Path | None" = None
 
 
-def init_tools(store: SemaStore, embedder: Embedder) -> None:
-    global _store, _embedder, _bm25
+def init_tools(store: SemaStore, embedder: Embedder, project_root: "Path | None" = None) -> None:
+    global _store, _embedder, _bm25, _project_root
     _store = store
     _embedder = embedder
     _bm25 = _build_bm25(store)
+    _project_root = project_root
 
 
 def _build_bm25(store: SemaStore) -> BM25Index | None:
@@ -187,42 +190,64 @@ def repo_map() -> str:
 @mcp.tool()
 def find_usages(symbol_name: str) -> str:
     """
-    Find all places where a function or class is referenced.
-    Uses hybrid search (BM25 + semantic) — finds call sites, imports, and type references.
+    Find every place a function, class, or variable is referenced —
+    call sites, imports, type annotations, and re-exports.
+
+    Uses exact word-boundary grep across all indexed files, so it finds
+    usages inside function bodies, not just in signatures.
+    Definition lines are excluded — only callers and references are returned.
 
     Args:
-        symbol_name: The function or class name to find usages of.
+        symbol_name: Exact name of the function or class (e.g. "validateToken")
     """
+    from ..utils.grep import grep_symbol, is_definition_line
+
     store = _require_store()
-    embedder = _require_embedder()
 
-    results: list[dict] = []
+    # ── 1. Grep: exact word-boundary matches across all files ─────────────────
+    if _project_root:
+        matches = grep_symbol(symbol_name, _project_root, max_results=30)
+        # Strip definition lines — keep only call sites, imports, type refs
+        usages = [
+            m for m in matches
+            if not is_definition_line(m["context"], symbol_name)
+        ]
+    else:
+        usages = []
 
-    if _bm25:
-        # BM25 finds exact name occurrences in bodies and signatures
-        bm25_results = _bm25.search(symbol_name, top_k=20)
-        # Exclude the definition itself — keep only callers/references
-        results = [r for r in bm25_results if r["name"].lower() != symbol_name.lower()][:10]
-
-    if not results:
-        # Fallback: semantic search
+    # ── 2. Fallback: semantic search (no project_root available) ──────────────
+    if not usages:
+        embedder = _require_embedder()
         embedding = embedder.embed_one(f"calls uses imports {symbol_name}")
         sem_results = store.search(embedding, top_k=10)
-        results = [
+        sem_usages = [
             r for r in sem_results
             if symbol_name.lower() in r["signature"].lower()
-            or symbol_name.lower() in r["id"].lower()
+            and r["name"].lower() != symbol_name.lower()
         ]
+        if not sem_usages:
+            return f"No usages of '{symbol_name}' found."
+        lines = [f"Usages of '{symbol_name}' (semantic fallback):\n"]
+        for u in sem_usages:
+            lines.append(
+                f"  {u['file']}::{u['name']}  [line {u['start_line']}]\n"
+                f"    {u['signature']}\n"
+            )
+        return "\n".join(lines)
 
-    if not results:
-        return f"No usages of '{symbol_name}' found in index."
+    # ── 3. Format grep results ────────────────────────────────────────────────
+    # Group by file for readability
+    by_file: dict[str, list[dict]] = {}
+    for m in usages:
+        by_file.setdefault(m["file"], []).append(m)
 
-    lines = [f"Usages of '{symbol_name}':\n"]
-    for u in results:
-        lines.append(
-            f"  {u['file']}::{u['name']}  [line {u['start_line']}]\n"
-            f"    {u['signature']}\n"
-        )
+    lines = [f"Usages of '{symbol_name}' ({len(usages)} references in {len(by_file)} files):\n"]
+    for file, hits in by_file.items():
+        lines.append(f"  {file}")
+        for h in hits:
+            lines.append(f"    line {h['line']:>4}:  {h['context']}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
