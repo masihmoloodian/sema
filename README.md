@@ -1,5 +1,11 @@
 # Sema
 
+<p align="center">
+  <img src="logo.png" alt="Sema" width="480" />
+</p>
+
+> **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [Disclaimer](#disclaimer) section.
+
 **Speed up Claude Code on large codebases. Stop wasting tokens on file navigation.**
 
 Sema is a semantic code indexer and MCP server for Claude Code. It indexes your entire codebase locally — every function, class, and method — and gives Claude a search API so it never has to read files blindly again.
@@ -9,8 +15,6 @@ Works with **Claude Code CLI** and the **Claude Code VS Code extension**.
 Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
 Index once. Claude searches forever.
-
-> **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [Disclaimer](#disclaimer) section.
 
 ---
 
