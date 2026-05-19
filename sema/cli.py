@@ -68,13 +68,21 @@ def index(path: str, reset: bool, verbose: bool):
     console.print("\nRun [bold]sema init[/bold] to register with Claude Code.")
 
 
-def _write_mcp_config(project_root: Path, index_path: Path) -> None:
-    """Write .claude/settings.json to register sema as an MCP server."""
+def _resolve_sema_bin() -> str:
+    """Return the absolute path to the sema binary."""
     import sys
-    sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
-    settings_dir = project_root / ".claude"
-    settings_dir.mkdir(exist_ok=True)
-    settings_file = settings_dir / "settings.json"
+    found = shutil.which("sema")
+    if found:
+        return found
+    # Fall back to the binary next to the current Python interpreter (venv layout)
+    candidate = Path(sys.executable).parent / "sema"
+    return str(candidate)
+
+
+def _write_mcp_config(settings_file: Path, project_root: Path) -> None:
+    """Upsert the sema entry in a Claude Code settings.json."""
+    sema_bin = _resolve_sema_bin()
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
     existing = json.loads(settings_file.read_text()) if settings_file.exists() else {}
     existing.setdefault("mcpServers", {})["sema"] = {
         "command": sema_bin,
@@ -84,57 +92,90 @@ def _write_mcp_config(project_root: Path, index_path: Path) -> None:
     console.print(f"[green]✔[/green] Wrote MCP config to {settings_file}")
 
 
+def _remove_mcp_config(settings_file: Path) -> bool:
+    """Remove the sema entry from a settings.json. Returns True if it was present."""
+    if not settings_file.exists():
+        return False
+    existing = json.loads(settings_file.read_text())
+    if "sema" not in existing.get("mcpServers", {}):
+        return False
+    del existing["mcpServers"]["sema"]
+    if not existing["mcpServers"]:
+        del existing["mcpServers"]
+    settings_file.write_text(json.dumps(existing, indent=2))
+    return True
+
+
 @main.command()
-@click.option("--all", "all_tools", is_flag=True, help="Configure all detected AI tools")
-@click.option("--uninstall", is_flag=True, help="Remove sema from AI tool configs")
-@click.option("--dry-run", is_flag=True, help="Show what would be done")
-def init(all_tools: bool, uninstall: bool, dry_run: bool):
-    """Register sema as an MCP server with Claude Code."""
+@click.option("--global", "use_global", is_flag=True,
+              help="Write to ~/.claude/settings.json instead of .claude/settings.json. "
+                   "Use this if Claude Code can't find sema after a normal init.")
+@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code config")
+@click.option("--dry-run", is_flag=True, help="Show what would be done without making changes")
+def init(use_global: bool, uninstall: bool, dry_run: bool):
+    """Register sema as an MCP server with Claude Code.
+
+    By default writes to .claude/settings.json in the current project.
+    Use --global to write to ~/.claude/settings.json instead — this makes
+    sema visible in Claude Code regardless of which project is open.
+    """
     project_root = Path(".").resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
-    serve_cmd = f"sema serve --project {project_root}"
+
+    global_settings = Path.home() / ".claude" / "settings.json"
+    project_settings = project_root / ".claude" / "settings.json"
+    settings_file = global_settings if use_global else project_settings
 
     if uninstall:
-        settings_file = project_root / ".claude" / "settings.json"
-        if not settings_file.exists():
-            console.print("[dim]No .claude/settings.json found — nothing to remove.[/dim]")
-            return
-        existing = json.loads(settings_file.read_text())
-        if "sema" not in existing.get("mcpServers", {}):
-            console.print("[dim]sema is not registered in .claude/settings.json[/dim]")
-            return
-        if dry_run:
-            console.print(f"[dim]Would remove mcpServers.sema from {settings_file}[/dim]")
-            return
-        del existing["mcpServers"]["sema"]
-        if not existing["mcpServers"]:
-            del existing["mcpServers"]
-        settings_file.write_text(json.dumps(existing, indent=2))
-        console.print(f"[yellow]✔[/yellow] Removed sema from {settings_file}")
-        console.print("Reload VS Code to apply the change.")
+        # Try both locations so --uninstall always cleans up completely
+        removed_any = False
+        for f in [project_settings, global_settings]:
+            if dry_run:
+                if f.exists() and "sema" in json.loads(f.read_text()).get("mcpServers", {}):
+                    console.print(f"[dim]Would remove mcpServers.sema from {f}[/dim]")
+                    removed_any = True
+            else:
+                if _remove_mcp_config(f):
+                    console.print(f"[yellow]✔[/yellow] Removed sema from {f}")
+                    removed_any = True
+        if not removed_any:
+            console.print("[dim]sema is not registered in any settings.json[/dim]")
+        else:
+            console.print("Reload VS Code to apply the change.")
         return
 
     if not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
-    console.print("Registering with Claude Code...")
+    scope = "global (~/.claude/)" if use_global else "project (.claude/)"
+    console.print(f"Registering with Claude Code ({scope})...")
 
-    if not dry_run:
-        _write_mcp_config(project_root, index_path)
+    if dry_run:
+        console.print(f"[dim]Would write to {settings_file}[/dim]")
+        console.print(f"[dim]  command: {_resolve_sema_bin()}[/dim]")
+        console.print(f"[dim]  args: serve --project {project_root}[/dim]")
+    else:
+        _write_mcp_config(settings_file, project_root)
 
     console.print("[green]✔[/green] Registered as MCP server 'sema'")
 
-    gitignore = Path(".gitignore")
-    entry = "\n# sema\n.sema/index/\n"
-    if not dry_run and gitignore.exists():
-        content = gitignore.read_text()
-        if ".sema/index/" not in content:
-            if click.confirm("Add .sema/index/ to .gitignore?", default=True):
-                gitignore.write_text(content + entry)
-                console.print("[green]✔[/green] Updated .gitignore")
+    if not use_global:
+        gitignore = Path(".gitignore")
+        entry = "\n# sema\n.sema/index/\n"
+        if not dry_run and gitignore.exists():
+            content = gitignore.read_text()
+            if ".sema/index/" not in content:
+                if click.confirm("Add .sema/index/ to .gitignore?", default=True):
+                    gitignore.write_text(content + entry)
+                    console.print("[green]✔[/green] Updated .gitignore")
 
     console.print("\n[bold]Done.[/bold] Restart VS Code or run /mcp in Claude chat to confirm.")
+    if not use_global:
+        console.print(
+            "\n[dim]Tip: if sema doesn't appear in /mcp, run [bold]sema init --global[/bold] "
+            "to register it in your global Claude Code config.[/dim]"
+        )
 
 
 @main.command()

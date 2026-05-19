@@ -20,6 +20,7 @@ Index once. Claude searches forever.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Troubleshooting](#troubleshooting)
 - [Managing sema](#managing-sema)
 - [CLI reference](#cli-reference)
 - [MCP tools](#mcp-tools)
@@ -337,6 +338,57 @@ no results. sema is faster and uses far fewer tokens.
 
 ---
 
+## Troubleshooting
+
+### sema not listed in `/mcp`
+
+If you run `/mcp` in Claude Code and sema doesn't appear at all, the most common cause is that `sema init` wrote the config to the wrong location. The fix:
+
+```bash
+cd your-project
+sema init --global
+```
+
+`--global` writes to `~/.claude/settings.json` instead of `.claude/settings.json` in the project. Claude Code always loads the global config regardless of which project is open, so sema will show up in every session.
+
+After running it, reload VS Code (`Cmd+Shift+P` → `Developer: Reload Window`) and check `/mcp` again.
+
+### Verify what `sema init` wrote
+
+```bash
+# Show what the project-level config contains
+cat .claude/settings.json
+
+# Show what the global config contains
+cat ~/.claude/settings.json
+```
+
+You should see something like:
+
+```json
+{
+  "mcpServers": {
+    "sema": {
+      "command": "/path/to/.venv/bin/sema",
+      "args": ["serve", "--project", "/absolute/path/to/your-project"]
+    }
+  }
+}
+```
+
+If `command` points to a path that doesn't exist, re-run `sema init` (or `sema init --global`) from within the activated virtual environment so the correct binary path is written.
+
+### Dry-run to preview without writing
+
+```bash
+sema init --dry-run
+sema init --global --dry-run
+```
+
+This prints what would be written without touching any files.
+
+---
+
 ## Managing sema
 
 ### Remove the index for a project
@@ -350,14 +402,12 @@ This deletes the vector database and metadata. Run `sema index .` to rebuild.
 
 ### Deactivate sema for a project (keep index)
 
-Remove sema from the project's Claude Code config:
+Remove sema from Claude Code config (checks both project and global locations):
 
 ```bash
 cd your-project
 sema init --uninstall
 ```
-
-Or manually delete the `mcpServers.sema` entry from `.claude/settings.json` in your project directory.
 
 To re-activate, run `sema init` again.
 
@@ -384,16 +434,18 @@ rm -rf /your-project/.sema/
 ## CLI reference
 
 ```
-sema index .               Index the current directory
-sema index . --reset       Delete existing index and re-index from scratch
-sema index ./path          Index a specific path
-sema init                  Register sema as MCP server with Claude Code
-sema init --uninstall      Remove sema from Claude Code config
-sema init --dry-run        Show what init would do without making changes
-sema search "query"        Run a semantic search (test without Claude)
-sema search "query" --top-k 10   Return more results
-sema status                Show index stats (chunks, files, model, last updated)
-sema serve --project .     Start MCP server (called automatically by Claude Code)
+sema index .                     Index the current directory
+sema index . --reset             Delete existing index and re-index from scratch
+sema index ./path                Index a specific path
+sema init                        Register sema as MCP server (writes .claude/settings.json)
+sema init --global               Register in ~/.claude/settings.json (fixes "not in /mcp" issues)
+sema init --uninstall            Remove sema from all Claude Code configs
+sema init --dry-run              Show what init would do without making changes
+sema search "query"              Run a hybrid semantic+BM25 search (test without Claude)
+sema search "query" --top-k 10  Return more results
+sema search "query" --all-types  Include docs/config sections in results
+sema status                      Show index stats (chunks, files, model, last updated)
+sema serve --project .           Start MCP server (called automatically by Claude Code)
 ```
 
 ---
