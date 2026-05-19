@@ -46,10 +46,10 @@ class Chunk:
         if self.docstring:
             parts.append(self.docstring[:200])
 
-        # First 4 body lines — captures NestJS decorators (@Post, @Injectable, @IsEmail)
-        # and early statements that reveal what a function does.
-        # Skipped for class/struct/interface: their bodies are schema declarations
-        # (TypeORM @Column, field types) which add noise rather than signal.
+        # First 4 body lines — captures decorators/annotations and early statements
+        # that reveal what the function does (works for any framework or language).
+        # Skipped for class/struct/interface: their bodies are field/schema declarations
+        # which add noise rather than signal.
         if self.body and self.chunk_type in ("function", "method"):
             lines = [ln.strip() for ln in self.body.splitlines() if ln.strip()]
             preview = " ".join(lines[:4])
