@@ -443,6 +443,8 @@ rm -rf /your-project/.sema/
 sema index .                     Index the current directory
 sema index . --reset             Delete existing index and re-index from scratch
 sema index ./path                Index a specific path
+sema watch                       Watch for file changes and re-index automatically
+sema watch ./path                Watch a specific directory
 sema init                        Register sema as MCP server (writes .claude/settings.json)
 sema init --uninstall            Remove sema from Claude Code config
 sema init --dry-run              Show what init would do without making changes
@@ -679,7 +681,7 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 - [ ] Better error messages when index is stale
 
 ### v0.3 — Incremental indexing
-- [ ] File watcher: `sema watch` re-indexes changed files in the background
+- [x] File watcher: `sema watch` re-indexes changed files automatically
 - [ ] Git hook: `sema init --watch` installs a post-commit hook
 - [ ] Only re-embed files changed since last index (tracked via git hash)
 

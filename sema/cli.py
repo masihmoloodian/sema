@@ -216,6 +216,47 @@ def status():
 
 
 @main.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+def watch(path: str):
+    """Watch for file changes and re-index automatically.
+
+    Re-indexes only the changed file on each save — not the whole project.
+    Run this in a terminal alongside your editor. Requires an existing index
+    (run sema index . first).
+    """
+    import datetime
+    from .indexer.chunker import index_file
+    from .indexer.embedder import Embedder
+    from .store.chroma import SemaStore
+    from .utils.watcher import start_watch
+
+    project_root = Path(path).resolve()
+    index_path = project_root / DEFAULT_INDEX_DIR
+
+    if not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    store = SemaStore(index_path)
+    embedder = Embedder()
+
+    console.print(f"[bold]Watching[/bold] {project_root}")
+    console.print("[dim]Re-indexing changed files automatically. Press Ctrl+C to stop.[/dim]\n")
+
+    def on_indexed(file_path: Path, n_chunks: int) -> None:
+        rel = file_path.relative_to(project_root)
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        if n_chunks == -1:
+            console.print(f"[dim]{ts}[/dim]  [yellow]removed[/yellow]  {rel}")
+        elif n_chunks == 0:
+            console.print(f"[dim]{ts}[/dim]  [dim]skipped[/dim]   {rel}")
+        else:
+            console.print(f"[dim]{ts}[/dim]  [green]indexed[/green]   {rel}  [dim]({n_chunks} chunks)[/dim]")
+
+    start_watch(project_root, store, embedder, on_indexed=on_indexed)
+
+
+@main.command()
 @click.option("--project", default=".", type=click.Path(exists=True))
 def serve(project: str):
     """Start MCP server (called automatically by Claude Code via mcp.json)."""

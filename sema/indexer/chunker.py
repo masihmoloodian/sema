@@ -73,6 +73,21 @@ def index_project(
     return stats
 
 
+def index_file(
+    file_path: Path,
+    project_root: Path,
+    store: SemaStore,
+    embedder: Embedder,
+) -> int:
+    """Re-index a single file incrementally. Returns number of new chunks stored."""
+    rel = str(file_path.relative_to(project_root))
+    store.delete_by_file(rel)
+    chunks = parse_file(file_path, project_root)
+    if chunks:
+        _flush(chunks, store, embedder)
+    return len(chunks)
+
+
 def _flush(chunks: list[Chunk], store: SemaStore, embedder: Embedder) -> None:
     texts = [c.embed_text() for c in chunks]
     embeddings = embedder.embed(texts)

@@ -12,6 +12,15 @@ def fixture_repo() -> Path:
 
 
 @pytest.fixture(scope="session")
+def embedder():
+    """Session-scoped embedder — model loaded once, reused across all tests."""
+    from sema.indexer.embedder import Embedder
+    e = Embedder()
+    e.embed_one("warmup")  # pre-load model into memory before any test uses it
+    return e
+
+
+@pytest.fixture(scope="session")
 def indexed_store(tmp_path_factory):
     """
     Index the example-repo fixture and return (store, embedder).
