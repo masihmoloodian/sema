@@ -124,6 +124,71 @@ def test_get_callees_file_path_filter(store):
     assert store.get_callees("process", file_path="y.ts") == ["saveData"]
 
 
+# ── get_callers source_file disambiguation ────────────────────────────────────
+
+def _make_chunk_with_imports(
+    name: str, calls: list[str], imports: list[str], file: str = "a.ts"
+) -> Chunk:
+    return Chunk(
+        id=f"{file}::{name}",
+        file=file,
+        language="typescript",
+        chunk_type="function",
+        name=name,
+        signature=f"{name}(): void",
+        body=f"function {name}() {{}}",
+        start_line=1,
+        end_line=2,
+        calls=calls,
+        imports=imports,
+    )
+
+
+def test_get_callers_source_file_filters_unrelated_caller(store):
+    """source_file removes callers that import from a different file."""
+    # handler.ts imports ./validator and calls validate → match
+    # payment.ts imports ./paymentUtils and calls validate → no match (coincidental name)
+    c1 = _make_chunk_with_imports("handler",        ["validate"], ["./validator"], file="handler.ts")
+    c2 = _make_chunk_with_imports("processPayment", ["validate"], ["./paymentUtils"], file="payment.ts")
+    store.upsert([c1, c2], [[0.1] * 384, [0.2] * 384])
+
+    callers = store.get_callers("validate", source_file="src/auth/validator.ts")
+    assert len(callers) == 1
+    assert callers[0]["name"] == "handler"
+
+
+def test_get_callers_source_file_relative_dot_style(store):
+    """Python-style '.validator' import should resolve to validator.py."""
+    c = _make_chunk_with_imports("check", ["validate"], [".validator"], file="middleware.py")
+    store.upsert([c], [[0.1] * 384])
+    callers = store.get_callers("validate", source_file="auth/validator.py")
+    assert len(callers) == 1
+
+
+def test_get_callers_source_file_deep_relative_import(store):
+    """../auth/validator style import resolves to any file named validator.*"""
+    c = _make_chunk_with_imports("doWork", ["validate"], ["../auth/validator"], file="api/handler.ts")
+    store.upsert([c], [[0.1] * 384])
+    callers = store.get_callers("validate", source_file="src/auth/validator.ts")
+    assert len(callers) == 1
+
+
+def test_get_callers_source_file_fail_open_when_no_imports(store):
+    """Callers with no imports stored are kept (can't rule them out)."""
+    # _make_chunk sets imports=[] by default
+    store.upsert([_make_chunk("foo", ["bar"])], [[0.1] * 384])
+    callers = store.get_callers("bar", source_file="some/bar.ts")
+    assert len(callers) == 1  # kept even though no imports to confirm
+
+
+def test_get_callers_without_source_file_returns_all(store):
+    """Without source_file the existing behaviour is preserved."""
+    c1 = _make_chunk_with_imports("a", ["validate"], ["./validatorA"], file="a.ts")
+    c2 = _make_chunk_with_imports("b", ["validate"], ["./validatorB"], file="b.ts")
+    store.upsert([c1, c2], [[0.1] * 384, [0.2] * 384])
+    assert len(store.get_callers("validate")) == 2
+
+
 # ── impact_analysis tool ──────────────────────────────────────────────────────
 
 def test_impact_analysis_shows_callees_and_callers(indexed_store):

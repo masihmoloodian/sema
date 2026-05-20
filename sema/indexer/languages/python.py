@@ -113,15 +113,84 @@ def _get_docstring(node: Node, source: bytes) -> str | None:
     return None
 
 
+def _build_type_map(node: Node, source: bytes) -> dict[str, str]:
+    """Build {varName: TypeName} by scanning for typed declarations in a node's subtree.
+
+    Covers three patterns:
+      svc: AuthService = ...      (annotated assignment)
+      svc = AuthService(...)      (uppercase constructor call on RHS)
+      def f(svc: AuthService)     (typed parameter)
+
+    Only uppercase type names are recorded so built-ins like str/int are ignored.
+    """
+    type_map: dict[str, str] = {}
+    _collect_type_hints(node, source, type_map)
+    return type_map
+
+
+def _collect_type_hints(node: Node, source: bytes, type_map: dict[str, str]) -> None:
+    if node.type == "assignment":
+        # Handles two sub-cases in one node type:
+        #   svc: AuthService = get_service()  → "type" child present
+        #   svc = AuthService(...)            → uppercase constructor on RHS
+        var_name: str | None = None
+        type_name: str | None = None
+        for child in node.children:
+            if child.type == "identifier" and var_name is None:
+                var_name = child.text.decode()
+            elif child.type == "type" and type_name is None:
+                # Inline annotation: svc: AuthService = ...
+                for c in child.children:
+                    if c.type == "identifier":
+                        candidate = c.text.decode()
+                        if candidate[0].isupper():
+                            type_name = candidate
+                        break
+            elif child.type == "call" and var_name is not None and type_name is None:
+                # Bare constructor: svc = AuthService(...)
+                fn = child.children[0] if child.children else None
+                if fn and fn.type == "identifier":
+                    fn_name = fn.text.decode()
+                    if fn_name[0].isupper():
+                        type_name = fn_name
+        if var_name and type_name:
+            type_map[var_name] = type_name
+
+    elif node.type == "typed_parameter":
+        # def f(svc: AuthService) — first identifier = param name, second = type
+        var_name = None
+        type_name = None
+        for child in node.children:
+            if child.type == "identifier" and var_name is None:
+                var_name = child.text.decode()
+            elif child.type == "identifier" and var_name is not None:
+                candidate = child.text.decode()
+                if candidate[0].isupper():
+                    type_name = candidate
+                    break
+        if var_name and type_name:
+            type_map[var_name] = type_name
+
+    for child in node.children:
+        _collect_type_hints(child, source, type_map)
+
+
 def _extract_calls(node: Node, source: bytes) -> list[str]:
     """Collect called symbols within a node's subtree, qualified where possible."""
     from ..builtins import PY_BUILTINS
     calls: set[str] = set()
-    _collect_calls(node, source, calls, PY_BUILTINS)
+    type_map = _build_type_map(node, source)
+    _collect_calls(node, source, calls, PY_BUILTINS, type_map)
     return sorted(calls)
 
 
-def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+def _collect_calls(
+    node: Node,
+    source: bytes,
+    calls: set[str],
+    builtins: frozenset[str],
+    type_map: dict[str, str] | None = None,
+) -> None:
     if node.type == "call":
         fn = node.children[0] if node.children else None
         if fn is not None:
@@ -130,7 +199,6 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
                 if name not in builtins:
                     calls.add(name)
             elif fn.type == "attribute":
-                # attribute: object . method — last child is the method name
                 last = fn.children[-1] if fn.children else None
                 obj_node = fn.children[0] if fn.children else None
                 if last and last.type == "identifier":
@@ -141,11 +209,12 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
                             if obj in ("self", "cls"):
                                 calls.add(method)
                             else:
-                                calls.add(f"{obj}.{method}")
+                                resolved = type_map.get(obj) if type_map else None
+                                calls.add(f"{resolved or obj}.{method}")
                         else:
                             calls.add(method)
     for child in node.children:
-        _collect_calls(child, source, calls, builtins)
+        _collect_calls(child, source, calls, builtins, type_map)
 
 
 def _make_function(node: Node, source: bytes, file: str, parent: str | None, file_imports: list[str] | None = None) -> Chunk:

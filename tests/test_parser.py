@@ -166,6 +166,122 @@ def test_parse_typed_arrow_function_name(tmp_path):
     assert chunks[0].name != "unknown"
 
 
+# ── Type inference in call extraction ────────────────────────────────────────
+
+def test_typescript_typed_variable_resolves_receiver():
+    """const svc: AuthService = ... → svc.validate() stored as AuthService.validate"""
+    from sema.indexer.languages.typescript import extract_chunks as ts_extract
+    src = """
+function processRequest(): void {
+    const authService: AuthService = inject(AuthService);
+    authService.validate();
+}
+"""
+    chunks = ts_extract(src, "handler.ts")
+    fn = next(c for c in chunks if c.name == "processRequest")
+    assert "AuthService.validate" in fn.calls
+    assert "authService.validate" not in fn.calls
+
+
+def test_typescript_new_expression_resolves_receiver():
+    """const svc = new AuthService() → svc.validate() stored as AuthService.validate"""
+    from sema.indexer.languages.typescript import extract_chunks as ts_extract
+    src = """
+function run(): void {
+    const svc = new UserService();
+    svc.save();
+}
+"""
+    chunks = ts_extract(src, "run.ts")
+    fn = next(c for c in chunks if c.name == "run")
+    assert "UserService.save" in fn.calls
+
+
+def test_typescript_typed_parameter_resolves_receiver():
+    """function f(svc: AuthService) → svc.validate() stored as AuthService.validate"""
+    from sema.indexer.languages.typescript import extract_chunks as ts_extract
+    src = """
+function handleAuth(svc: AuthService): void {
+    svc.validate();
+}
+"""
+    chunks = ts_extract(src, "handler.ts")
+    fn = next(c for c in chunks if c.name == "handleAuth")
+    assert "AuthService.validate" in fn.calls
+
+
+def test_python_annotated_assignment_resolves_receiver():
+    """svc: AuthService = ... → svc.validate() stored as AuthService.validate"""
+    from sema.indexer.languages.python import extract_chunks as py_extract
+    src = """
+def process():
+    svc: AuthService = get_service()
+    svc.validate()
+"""
+    chunks = py_extract(src, "handler.py")
+    fn = next(c for c in chunks if c.name == "process")
+    assert "AuthService.validate" in fn.calls
+
+
+def test_python_constructor_call_resolves_receiver():
+    """svc = AuthService() → svc.validate() stored as AuthService.validate"""
+    from sema.indexer.languages.python import extract_chunks as py_extract
+    src = """
+def run():
+    svc = UserService()
+    svc.save()
+"""
+    chunks = py_extract(src, "run.py")
+    fn = next(c for c in chunks if c.name == "run")
+    assert "UserService.save" in fn.calls
+
+
+def test_go_new_constructor_resolves_receiver():
+    """svc := NewAuthService() → svc.Validate() stored as AuthService.Validate"""
+    from sema.indexer.languages.golang import extract_chunks as go_extract
+    src = """
+package main
+
+func Run() {
+    svc := NewAuthService()
+    svc.Validate()
+}
+"""
+    chunks = go_extract(src, "main.go")
+    fn = next(c for c in chunks if c.name == "Run")
+    assert "AuthService.Validate" in fn.calls
+
+
+def test_go_composite_literal_resolves_receiver():
+    """svc := AuthService{} → svc.Validate() stored as AuthService.Validate"""
+    from sema.indexer.languages.golang import extract_chunks as go_extract
+    src = """
+package main
+
+func Run() {
+    svc := AuthService{}
+    svc.Validate()
+}
+"""
+    chunks = go_extract(src, "main.go")
+    fn = next(c for c in chunks if c.name == "Run")
+    assert "AuthService.Validate" in fn.calls
+
+
+def test_untyped_receiver_falls_back_to_variable_name():
+    """When no type info is available, store varName.method as before."""
+    from sema.indexer.languages.typescript import extract_chunks as ts_extract
+    src = """
+function run(unknown): void {
+    unknown.validate();
+}
+"""
+    chunks = ts_extract(src, "run.ts")
+    fn = next(c for c in chunks if c.name == "run")
+    # No type annotation → falls back to variable-name qualified form
+    assert "unknown.validate" in fn.calls
+
+
 def test_register_adds_extension(tmp_path):
     from sema.store.schema import Chunk
 

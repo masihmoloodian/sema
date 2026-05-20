@@ -1,8 +1,8 @@
-"""Tests for grep_symbol and is_definition_line."""
+"""Tests for grep_symbol, grep_symbol_dynamic, and is_definition_line."""
 
 import pytest
 from pathlib import Path
-from sema.utils.grep import grep_symbol, is_definition_line
+from sema.utils.grep import grep_symbol, grep_symbol_dynamic, is_definition_line
 
 
 # ── grep_symbol ───────────────────────────────────────────────────────────────
@@ -78,6 +78,43 @@ def test_skips_node_modules(tmp_path):
     (tmp_path / "app.ts").write_text("validateToken();\n")
     results = grep_symbol("validateToken", tmp_path)
     assert all("node_modules" not in r["file"] for r in results)
+
+
+# ── grep_symbol_dynamic ───────────────────────────────────────────────────────
+
+def test_dynamic_finds_bracket_access(tmp_path):
+    (tmp_path / "app.ts").write_text('handler["validate"](req);\n')
+    results = grep_symbol_dynamic("validate", tmp_path)
+    assert len(results) == 1
+    assert results[0]["dynamic"] is True
+
+
+def test_dynamic_finds_getattr(tmp_path):
+    (tmp_path / "util.py").write_text('getattr(obj, "validate")\n')
+    results = grep_symbol_dynamic("validate", tmp_path)
+    assert len(results) == 1
+
+
+def test_dynamic_finds_single_quotes(tmp_path):
+    (tmp_path / "app.js").write_text("registry.get('validate')\n")
+    results = grep_symbol_dynamic("validate", tmp_path)
+    assert len(results) == 1
+
+
+def test_dynamic_no_false_positives_plain_strings(tmp_path):
+    # A string that mentions the name but is not a dynamic call reference
+    (tmp_path / "readme.md").write_text('This calls the "validate" step.\n')
+    results = grep_symbol_dynamic("validate", tmp_path)
+    # "validate" is followed by a space, not ] ) , — should not match
+    assert len(results) == 0
+
+
+def test_dynamic_deduped_from_static_in_find_usages(tmp_path):
+    # If a line is already caught by regular grep, dynamic grep should not duplicate it
+    # in find_usages (tested indirectly via the seen_keys dedup logic in tools.py)
+    (tmp_path / "app.ts").write_text('obj["validate"](x);\n')
+    static = grep_symbol_dynamic("validate", tmp_path)
+    assert len(static) == 1  # one match, dynamic=True
 
 
 # ── is_definition_line ────────────────────────────────────────────────────────

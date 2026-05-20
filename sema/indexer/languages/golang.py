@@ -84,15 +84,85 @@ def _get_result(node: Node, source: bytes) -> str | None:
     return None
 
 
+def _build_type_map(node: Node, source: bytes) -> dict[str, str]:
+    """Build {varName: TypeName} from typed Go declarations in a node's subtree.
+
+    Covers two patterns:
+      var svc *AuthService = ...      (var declaration with explicit type)
+      svc := NewAuthService(...)      (short declaration with NewXxx constructor)
+      svc := AuthService{...}         (composite literal constructor)
+
+    The NewXxx → Xxx stripping is the Go constructor naming convention.
+    """
+    type_map: dict[str, str] = {}
+    _collect_type_hints(node, source, type_map)
+    return type_map
+
+
+def _collect_type_hints(node: Node, source: bytes, type_map: dict[str, str]) -> None:
+    if node.type == "var_declaration":
+        for child in node.children:
+            if child.type == "var_spec":
+                var_name: str | None = None
+                type_name: str | None = None
+                for c in child.children:
+                    if c.type == "identifier" and var_name is None:
+                        var_name = c.text.decode()
+                    elif c.type in ("type_identifier", "pointer_type") and type_name is None:
+                        raw = _node_text(c, source).lstrip("*")
+                        if raw and raw[0].isupper():
+                            type_name = raw
+                if var_name and type_name:
+                    type_map[var_name] = type_name
+
+    elif node.type == "short_var_declaration":
+        # Both sides are expression_list in Go's grammar.
+        # svc := NewService()   →  left=expression_list("svc"), right=expression_list(call)
+        # svc := Service{}      →  left=expression_list("svc"), right=expression_list(literal)
+        expr_lists: list[Node] = [c for c in node.children if c.type == "expression_list"]
+        if len(expr_lists) >= 2:
+            left_list, right_list = expr_lists[0], expr_lists[1]
+            identifiers = [c.text.decode() for c in left_list.children if c.type == "identifier"]
+            if identifiers:
+                for c in right_list.children:
+                    if c.type == "call_expression":
+                        fn = c.children[0] if c.children else None
+                        if fn and fn.type == "identifier":
+                            fn_name = fn.text.decode()
+                            # NewAuthService → AuthService (Go constructor convention)
+                            if fn_name.startswith("New") and len(fn_name) > 3:
+                                type_map[identifiers[0]] = fn_name[3:]
+                        break
+                    elif c.type == "composite_literal":
+                        type_node = next(
+                            (ch for ch in c.children if ch.type == "type_identifier"), None
+                        )
+                        if type_node:
+                            raw = type_node.text.decode()
+                            if raw and raw[0].isupper():
+                                type_map[identifiers[0]] = raw
+                        break
+
+    for child in node.children:
+        _collect_type_hints(child, source, type_map)
+
+
 def _extract_calls(node: Node, source: bytes) -> list[str]:
     """Collect called symbols within a node's subtree, qualified where possible."""
     from ..builtins import GO_BUILTINS
     calls: set[str] = set()
-    _collect_calls(node, source, calls, GO_BUILTINS)
+    type_map = _build_type_map(node, source)
+    _collect_calls(node, source, calls, GO_BUILTINS, type_map)
     return sorted(calls)
 
 
-def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+def _collect_calls(
+    node: Node,
+    source: bytes,
+    calls: set[str],
+    builtins: frozenset[str],
+    type_map: dict[str, str] | None = None,
+) -> None:
     if node.type == "call_expression":
         fn = node.children[0] if node.children else None
         if fn is not None:
@@ -109,11 +179,13 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
                         break
                 if method and method not in builtins:
                     if obj_node and obj_node.type == "identifier":
-                        calls.add(f"{obj_node.text.decode()}.{method}")
+                        obj = obj_node.text.decode()
+                        resolved = type_map.get(obj) if type_map else None
+                        calls.add(f"{resolved or obj}.{method}")
                     else:
                         calls.add(method)
     for child in node.children:
-        _collect_calls(child, source, calls, builtins)
+        _collect_calls(child, source, calls, builtins, type_map)
 
 
 def _make_function(node: Node, source: bytes, file: str, file_imports: list[str] | None = None) -> Chunk:

@@ -46,6 +46,47 @@ def grep_symbol(
     return results
 
 
+def grep_symbol_dynamic(
+    symbol_name: str,
+    project_root: Path,
+    max_results: int = 20,
+) -> list[dict]:
+    """Search for dynamic references: symbol_name used as a string literal.
+
+    Catches patterns that word-boundary grep misses:
+      obj["validate"]()            JavaScript/TypeScript bracket access
+      obj['validate']              Python dict / dynamic dispatch
+      getattr(obj, "validate")     Python reflection
+      registry.get("validate")     String-key registries
+
+    Pattern: the symbol name surrounded by single or double quotes,
+    optionally followed by ] or ) to reduce false positives from plain strings.
+    """
+    pattern = re.compile(
+        r"""(["'])""" + re.escape(symbol_name) + r"""(["'])\s*[\]\),]""",
+    )
+    results: list[dict] = []
+
+    for file_path in walk_project(project_root):
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for line_no, line in enumerate(content.splitlines(), 1):
+            if pattern.search(line):
+                results.append({
+                    "file": str(file_path.relative_to(project_root)),
+                    "line": line_no,
+                    "context": line.strip()[:_MAX_LINE_LEN],
+                    "dynamic": True,
+                })
+                if len(results) >= max_results:
+                    return results
+
+    return results
+
+
 def is_definition_line(line: str, symbol_name: str) -> bool:
     """
     Return True if this line declares the symbol rather than using it.

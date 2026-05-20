@@ -212,15 +212,85 @@ def _get_arrow_name(decl_node: Node) -> str:
     return "unknown"
 
 
+def _build_type_map(node: Node, source: bytes) -> dict[str, str]:
+    """Build {varName: TypeName} by scanning for typed declarations in a node's subtree.
+
+    Covers three patterns:
+      const svc: AuthService = ...     (lexical_declaration with type_annotation)
+      const svc = new AuthService()    (new_expression initialiser)
+      function f(svc: AuthService)     (typed formal parameter)
+
+    Only records mappings where the type name starts with an uppercase letter
+    so primitive annotations (string, number, boolean) are ignored.
+    """
+    type_map: dict[str, str] = {}
+    _collect_type_hints(node, source, type_map)
+    return type_map
+
+
+def _collect_type_hints(node: Node, source: bytes, type_map: dict[str, str]) -> None:
+    if node.type == "variable_declarator":
+        var_name: str | None = None
+        type_name: str | None = None
+        for child in node.children:
+            if child.type == "identifier" and var_name is None:
+                var_name = child.text.decode()
+            elif child.type == "type_annotation" and type_name is None:
+                # ": AuthService"  or  ": AuthService<T>"
+                for c in child.children:
+                    if c.type == "type_identifier":
+                        type_name = c.text.decode()
+                        break
+                    if c.type == "generic_type":
+                        for gc in c.children:
+                            if gc.type == "type_identifier":
+                                type_name = gc.text.decode()
+                                break
+                        break
+            elif child.type == "new_expression" and type_name is None:
+                # "= new AuthService(...)"
+                for c in child.children:
+                    if c.type in ("identifier", "type_identifier"):
+                        type_name = c.text.decode()
+                        break
+        if var_name and type_name and type_name[0].isupper():
+            type_map[var_name] = type_name
+
+    elif node.type in ("required_parameter", "optional_parameter"):
+        # f(svc: AuthService) — typed formal parameter
+        var_name = None
+        type_name = None
+        for child in node.children:
+            if child.type in ("identifier", "pattern") and var_name is None:
+                var_name = child.text.decode()
+            elif child.type == "type_annotation" and type_name is None:
+                for c in child.children:
+                    if c.type == "type_identifier":
+                        type_name = c.text.decode()
+                        break
+        if var_name and type_name and type_name[0].isupper():
+            type_map[var_name] = type_name
+
+    for child in node.children:
+        _collect_type_hints(child, source, type_map)
+
+
 def _extract_calls(node: Node, source: bytes) -> list[str]:
     """Collect called symbols within a node's subtree, qualified where possible."""
     from ..builtins import TS_BUILTINS
     calls: set[str] = set()
-    _collect_calls(node, source, calls, TS_BUILTINS)
+    type_map = _build_type_map(node, source)
+    _collect_calls(node, source, calls, TS_BUILTINS, type_map)
     return sorted(calls)
 
 
-def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+def _collect_calls(
+    node: Node,
+    source: bytes,
+    calls: set[str],
+    builtins: frozenset[str],
+    type_map: dict[str, str] | None = None,
+) -> None:
     if node.type == "call_expression":
         fn = node.children[0] if node.children else None
         if fn is not None:
@@ -236,13 +306,15 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
                         prop = child.text.decode()
                         break
                 if prop and prop not in builtins:
-                    # Qualify as "obj.method" when object is a plain identifier (not `this`)
                     if obj_node and obj_node.type == "identifier":
                         obj = obj_node.text.decode()
                         if obj == "this":
                             calls.add(prop)
                         else:
-                            calls.add(f"{obj}.{prop}")
+                            # Resolve receiver type when possible so
+                            # authService.validate() → AuthService.validate
+                            resolved = type_map.get(obj) if type_map else None
+                            calls.add(f"{resolved or obj}.{prop}")
                     else:
                         calls.add(prop)
     elif node.type == "new_expression":
@@ -253,7 +325,7 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
                     calls.add(name)
                 break
     for child in node.children:
-        _collect_calls(child, source, calls, builtins)
+        _collect_calls(child, source, calls, builtins, type_map)
 
 
 def _make_arrow_fn(

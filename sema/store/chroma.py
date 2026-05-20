@@ -10,6 +10,35 @@ from pathlib import Path
 from .schema import Chunk
 
 
+def _import_could_resolve_to(imp: str, source_file: str) -> bool:
+    """Return True if the import path could refer to source_file.
+
+    Compares the stem of the import's last path segment against the stem of
+    source_file. Only considers relative imports (starting with '.' or '/')
+    so npm packages and stdlib paths are never mistaken for local files.
+
+    Examples that match  source_file="src/auth/validator.ts":
+      "./validator"          stem "validator" == "validator"
+      "../auth/validator"    stem "validator" == "validator"
+      ".validator"           stripped → "validator" == "validator"  (Python style)
+
+    Examples that do NOT match:
+      "validatorHelpers"     stem "validatorHelpers" != "validator"
+      "express"              not relative → excluded
+      "encoding/json"        not relative → excluded
+    """
+    if not (imp.startswith(".") or imp.startswith("/")):
+        return False
+    source_stem = Path(source_file).stem
+    # Strip leading dots/slashes, then take the last segment, then strip extension
+    stripped = imp.lstrip("./")
+    if not stripped:
+        return False
+    last_part = stripped.split("/")[-1]
+    last_stem = last_part.rsplit(".", 1)[0] if "." in last_part else last_part
+    return last_stem == source_stem
+
+
 class SemaStore:
     COLLECTION_NAME = "sema_chunks"
 
@@ -37,6 +66,8 @@ class SemaStore:
                 "start_line": meta["start_line"],
                 "chunk_type": meta["chunk_type"],
                 "signature": meta["signature"],
+                # Stored internally for import-aware disambiguation; stripped before returning.
+                "_imports": meta.get("imports", ""),
             }
             for callee in calls_str.split(","):
                 callee = callee.strip()
@@ -130,12 +161,18 @@ class SemaStore:
         results = self.collection.get(include=["metadatas"])
         return results["ids"], results["metadatas"]
 
-    def get_callers(self, symbol_name: str) -> list[dict]:
+    def get_callers(self, symbol_name: str, source_file: str | None = None) -> list[dict]:
         """Find all chunks that call symbol_name.
 
         Matches exact names and qualified names (e.g. querying "verify"
         also matches callers that recorded "jwt.verify").
         Uses an in-memory inverted index built once per store lifetime.
+
+        source_file: when provided, filters to callers whose stored imports
+        include a relative path that resolves to this file (stem match).
+        Callers with no import data are kept (fail-open — can't confirm or
+        rule them out). This eliminates false positives when the same symbol
+        name exists in unrelated files.
         """
         if self._callers_cache is None:
             self._callers_cache = self._build_callers_cache()
@@ -143,12 +180,23 @@ class SemaStore:
         seen: set[tuple] = set()
         results: list[dict] = []
 
+        def _passes_import_filter(c: dict) -> bool:
+            if source_file is None:
+                return True
+            imp_list = [i.strip() for i in c["_imports"].split(",") if i.strip()]
+            if not imp_list:
+                return True  # no import data — fail open
+            return any(_import_could_resolve_to(i, source_file) for i in imp_list)
+
         def _add(callers: list[dict]) -> None:
             for c in callers:
+                if not _passes_import_filter(c):
+                    continue
                 key = (c["file"], c["name"], c["start_line"])
                 if key not in seen:
                     seen.add(key)
-                    results.append(c)
+                    # Expose public fields only — strip the internal _imports key
+                    results.append({k: v for k, v in c.items() if not k.startswith("_")})
 
         _add(self._callers_cache.get(symbol_name, []))
         # Also match qualified names: "jwt.verify" satisfies a query for "verify"

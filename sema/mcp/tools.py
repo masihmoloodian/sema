@@ -222,18 +222,46 @@ def find_usages(symbol_name: str) -> str:
 
     store = _require_store()
 
-    # ── 1. Grep: exact word-boundary matches across all files ─────────────────
+    # ── 1. Grep: exact word-boundary + dynamic string-literal search ─────────
     if _project_root:
+        from ..utils.grep import grep_symbol_dynamic
+
         matches = grep_symbol(symbol_name, _project_root, max_results=30)
-        # Strip definition lines — keep only call sites, imports, type refs
         usages = [
             m for m in matches
             if not is_definition_line(m["context"], symbol_name)
         ]
+        # Also search for string-literal usage: obj["symbol"] / getattr(obj, "symbol")
+        dynamic = grep_symbol_dynamic(symbol_name, _project_root, max_results=20)
+        seen_keys: set[tuple] = {(u["file"], u["line"]) for u in usages}
+        for d in dynamic:
+            if (d["file"], d["line"]) not in seen_keys:
+                usages.append(d)
+                seen_keys.add((d["file"], d["line"]))
     else:
         usages = []
 
-    # ── 2. Fallback: semantic search (no project_root available) ──────────────
+    # ── 2. Fallback: callers from call graph ──────────────────────────────────
+    # More accurate than embedding similarity: uses the stored calls[] field
+    # which was extracted directly from the AST at index time.
+    if not usages:
+        callers_from_graph = store.get_callers(symbol_name)
+        if callers_from_graph:
+            by_file: dict[str, list[dict]] = {}
+            for c in callers_from_graph:
+                by_file.setdefault(c["file"], []).append(c)
+            lines = [
+                f"Usages of '{symbol_name}' "
+                f"({len(callers_from_graph)} callers in {len(by_file)} files, from call graph):\n"
+            ]
+            for file, hits in by_file.items():
+                lines.append(f"  {file}")
+                for h in hits:
+                    lines.append(f"    line {h['start_line']:>4}:  {h['chunk_type']}: {h['signature']}")
+                lines.append("")
+            return "\n".join(lines)
+
+    # ── 3. Last resort: semantic similarity ───────────────────────────────────
     if not usages:
         embedder = _require_embedder()
         embedding = embedder.embed_one(f"calls uses imports {symbol_name}")
@@ -245,7 +273,10 @@ def find_usages(symbol_name: str) -> str:
         ]
         if not sem_usages:
             return f"No usages of '{symbol_name}' found."
-        lines = [f"Usages of '{symbol_name}' (semantic fallback):\n"]
+        lines = [
+            f"Usages of '{symbol_name}' (approximate — semantic fallback, "
+            "consider re-indexing for exact results):\n"
+        ]
         for u in sem_usages:
             lines.append(
                 f"  {u['file']}::{u['name']}  [line {u['start_line']}]\n"
@@ -253,17 +284,23 @@ def find_usages(symbol_name: str) -> str:
             )
         return "\n".join(lines)
 
-    # ── 3. Format grep results ────────────────────────────────────────────────
+    # ── 4. Format grep results ────────────────────────────────────────────────
     # Group by file for readability
     by_file: dict[str, list[dict]] = {}
     for m in usages:
         by_file.setdefault(m["file"], []).append(m)
 
-    lines = [f"Usages of '{symbol_name}' ({len(usages)} references in {len(by_file)} files):\n"]
+    static = sum(1 for u in usages if not u.get("dynamic"))
+    dynamic_count = len(usages) - static
+    summary = f"{len(usages)} references in {len(by_file)} files"
+    if dynamic_count:
+        summary += f" ({dynamic_count} dynamic)"
+    lines = [f"Usages of '{symbol_name}' ({summary}):\n"]
     for file, hits in by_file.items():
         lines.append(f"  {file}")
         for h in hits:
-            lines.append(f"    line {h['line']:>4}:  {h['context']}")
+            tag = "  [dynamic]" if h.get("dynamic") else ""
+            lines.append(f"    line {h['line']:>4}:  {h['context']}{tag}")
         lines.append("")
 
     return "\n".join(lines)
@@ -328,16 +365,27 @@ def impact_analysis(
 
     # ── Callers: BFS upward ───────────────────────────────────────────────────
     caller_levels: list[list[dict]] = []
-    caller_visited: set[str] = {symbol_name}
+    # Track visited chunks by (file, name) so that a caller with the same
+    # name as the root symbol (e.g. a controller method that delegates to
+    # a same-named service method) is not silently dropped.
+    caller_visited: set[tuple[str, str]] = set()
+    # Only pre-seed when file_path narrows to a specific chunk — otherwise
+    # we would incorrectly exclude same-named callers from other files.
+    if file_path:
+        caller_visited.add((file_path, symbol_name))
     frontier = [symbol_name]
 
-    for _ in range(depth):
+    for depth_idx in range(depth):
         next_frontier: list[str] = []
         level_hits: list[dict] = []
         for sym in frontier:
-            for caller in store.get_callers(sym):
-                if caller["name"] not in caller_visited:
-                    caller_visited.add(caller["name"])
+            # For the root symbol we know its file, so apply import-aware filtering.
+            # For deeper levels we lack file context — skip filtering to avoid false negatives.
+            src = file_path if (depth_idx == 0 and sym == symbol_name) else None
+            for caller in store.get_callers(sym, source_file=src):
+                key = (caller["file"], caller["name"])
+                if key not in caller_visited:
+                    caller_visited.add(key)
                     next_frontier.append(caller["name"])
                     level_hits.append(caller)
         if not level_hits:
