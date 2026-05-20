@@ -118,22 +118,21 @@ Token estimates: ~1 token per 4 characters of source code.
 | Step | Tool call | Tokens |
 |---|---|---|
 | Scan directory structure | `Bash: find . -name "*.ts" \| grep -i auth` | ~300 |
-| Grep for magic link references | `Bash: grep -r "magicLink\|magic_link" --include="*.ts" -l` | ~200 |
-| Read auth service | `Read: auth/auth.service.ts` (392 lines) | ~4,200 |
-| Read auth controller | `Read: auth/auth.controller.ts` (230 lines) | ~2,500 |
-| Read JWT strategy | `Read: auth/strategies/jwt.strategy.ts` (110 lines) | ~1,200 |
-| Read mailer service | `Read: mailer/mailer.service.ts` (89 lines) | ~1,000 |
-| Read auth module | `Read: auth/auth.module.ts` (66 lines) | ~700 |
-| **Total** | **7 tool calls** | **~10,100 tokens** |
+| Read auth service | `Read: auth/auth.service.ts` (392 lines) | 2,613 |
+| Read auth controller | `Read: auth/auth.controller.ts` (230 lines) | 1,744 |
+| Read JWT strategy | `Read: auth/strategies/jwt.strategy.ts` (110 lines) | 718 |
+| Read mailer service | `Read: mailer/mailer.service.ts` (89 lines) | 621 |
+| Read auth module | `Read: auth/auth.module.ts` (66 lines) | 479 |
+| **Total** | **6 tool calls** | **~6,475 tokens** |
 
 **With sema** — one search surfaces the exact symbols:
 
 | Step | Tool call | Tokens |
 |---|---|---|
-| Find relevant symbols | `search_code("magic link authentication send email")` | ~180 |
-| Read service implementation | `get_code("signInMagicLink")` | ~410 |
-| Read controller endpoint | `get_code("sendMagicLink")` | ~300 |
-| **Total** | **3 tool calls** | **~890 tokens** |
+| Find relevant symbols | `search_code("magic link authentication send email")` | 237 |
+| Read service implementation | `get_code("signInMagicLink")` | 465 |
+| Read controller endpoint | `get_code("signInMagicLink")` (controller) | 135 |
+| **Total** | **3 tool calls** | **837 tokens** |
 
 ```
 search_code("magic link authentication send email")
@@ -148,7 +147,7 @@ search_code("magic link authentication send email")
      method: sendEmail(...)
 ```
 
-**Result: 3 tool calls vs 7, ~890 tokens vs ~10,100 tokens — 11× reduction.**
+**Result: 3 tool calls vs 6, 837 tokens vs 6,475 tokens — 8× reduction.**
 
 ---
 
@@ -161,10 +160,10 @@ search_code("magic link authentication send email")
 | Step | Tool call | Tokens |
 |---|---|---|
 | Find Python files related to JWT | `Bash: grep -r "jwt\|token" --include="*.py" -l` | ~200 |
-| Read JWT strategy | `Read: authentication/strategy/jwt.py` (72 lines) | ~800 |
-| Read JWT utilities | `Read: fastapi_users/jwt.py` (41 lines) | ~500 |
-| Read user manager | `Read: fastapi_users/manager.py` (715 lines) | ~7,800 |
-| **Total** | **5 tool calls** | **~9,300 tokens** |
+| Read JWT strategy | `Read: authentication/strategy/jwt.py` (72 lines) | 506 |
+| Read JWT utilities | `Read: fastapi_users/jwt.py` (41 lines) | 233 |
+| Read user manager | `Read: fastapi_users/manager.py` (715 lines) | 5,024 |
+| **Total** | **4 tool calls** | **~5,963 tokens** |
 
 *(manager.py must be read in full because the create/register flow spans the whole file — no way to know which lines matter without reading it)*
 
@@ -172,10 +171,10 @@ search_code("magic link authentication send email")
 
 | Step | Tool call | Tokens |
 |---|---|---|
-| Find JWT symbols | `search_code("JWT token create write validate")` | ~180 |
-| Read token generator | `get_code("generate_jwt")` | ~250 |
-| Read strategy write | `get_code("write_token")` | ~480 |
-| **Total** | **3 tool calls** | **~910 tokens** |
+| Find JWT symbols | `search_code("JWT token create write validate")` | 229 |
+| Read token generator | `get_code("generate_jwt")` | 106 |
+| Read strategy write | `get_code("write_token")` | 331 |
+| **Total** | **3 tool calls** | **666 tokens** |
 
 ```
 search_code("JWT token create write validate")
@@ -188,7 +187,7 @@ search_code("JWT token create write validate")
      method: def read_token(self, token: str, ...) -> models.UP
 ```
 
-**Result: 3 tool calls vs 5, ~910 tokens vs ~9,300 tokens — 10× reduction.**
+**Result: 3 tool calls vs 4, 666 tokens vs 5,963 tokens — 9× reduction.**
 
 ---
 
@@ -201,19 +200,19 @@ search_code("JWT token create write validate")
 | Step | Tool call | Tokens |
 |---|---|---|
 | Explore project structure | `Bash: ls -la users/ common/` | ~150 |
-| Read middleware file | `Read: users/middlewares.go` (75 lines) | ~810 |
-| Read token utilities | `Read: common/utils.go` (99 lines) | ~1,100 |
-| Read router setup | `Read: users/routers.go` (137 lines) | ~1,500 |
-| **Total** | **4 tool calls** | **~3,560 tokens** |
+| Read middleware file | `Read: users/middlewares.go` (75 lines) | 487 |
+| Read token utilities | `Read: common/utils.go` (99 lines) | 760 |
+| Read router setup | `Read: users/routers.go` (137 lines) | 1,000 |
+| **Total** | **4 tool calls** | **~2,397 tokens** |
 
 **With sema:**
 
 | Step | Tool call | Tokens |
 |---|---|---|
-| Find auth middleware | `search_code("authentication middleware JWT token")` | ~180 |
-| Read middleware logic | `get_code("AuthMiddleware")` | ~454 |
-| Read token generator | `get_code("GenToken")` | ~260 |
-| **Total** | **3 tool calls** | **~894 tokens** |
+| Find auth middleware | `search_code("authentication middleware JWT token")` | 185 |
+| Read middleware logic | `get_code("AuthMiddleware")` | 235 |
+| Read token generator | `get_code("GenToken")` | 132 |
+| **Total** | **3 tool calls** | **552 tokens** |
 
 ```
 search_code("authentication middleware JWT token")
@@ -226,7 +225,7 @@ search_code("authentication middleware JWT token")
      function: func GenToken(id uint) string
 ```
 
-**Result: 3 tool calls vs 4, ~894 tokens vs ~3,560 tokens — 4× reduction.**
+**Result: 3 tool calls vs 4, 552 tokens vs 2,397 tokens — 4× reduction.**
 
 *(The Go repo has only 30 files — sema's advantage grows with codebase size.)*
 
@@ -236,11 +235,13 @@ search_code("authentication middleware JWT token")
 
 | Repo | Language | Files | Without sema | With sema | Reduction |
 |---|---|---|---|---|---|
-| hoppscotch | TypeScript | 1,172 | ~10,100 tokens / 7 calls | ~890 tokens / 3 calls | **11×** |
-| fastapi-users | Python | 123 | ~9,300 tokens / 5 calls | ~910 tokens / 3 calls | **10×** |
-| golang-gin-realworld | Go | 30 | ~3,560 tokens / 4 calls | ~894 tokens / 3 calls | **4×** |
+| hoppscotch | TypeScript | 1,172 | 6,475 tokens / 6 calls | 837 tokens / 3 calls | **8×** |
+| fastapi-users | Python | 123 | 5,963 tokens / 4 calls | 666 tokens / 3 calls | **9×** |
+| golang-gin-realworld | Go | 30 | 2,397 tokens / 4 calls | 552 tokens / 3 calls | **4×** |
 
-The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "without" cost grows linearly with repo size because Claude must read more files to locate the right code. On large TypeScript or Python projects the savings are consistently 10×.
+Token counts are measured using `tiktoken` (cl100k_base) on the actual files from each repo, and on real `search_code` / `get_code` output. The "without" bash command costs are estimated at ~150–300 tokens each.
+
+The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "without" cost grows with repo size because Claude must read whole files to locate relevant code. On large TypeScript or Python projects the savings are consistently 8–9×.
 
 ---
 
