@@ -923,12 +923,14 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 ## Roadmap
 
 ### v0.2 — Tool improvements
-- [ ] `find_usages` backed by grep for exact reference matching
+- [x] `find_usages` backed by grep for exact reference matching
+- [x] Call graph: `impact_analysis(symbol, depth)` — callers + callees, BFS multi-level, qualified names, builtin filtering, inverted index cache
 - [ ] `explain_file` includes import graph
 - [ ] Better error messages when index is stale
 
 ### v0.3 — Incremental indexing
 - [x] File watcher: `sema watch` re-indexes changed files automatically
+- [x] Workspace support: `sema index --workspace` and `sema watch --workspace` index only listed folders with correct base paths
 - [ ] Git hook: `sema init --watch` installs a post-commit hook
 - [ ] Only re-embed files changed since last index (tracked via git hash)
 
@@ -942,7 +944,7 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 
 ### v0.5 — Multi-project & monorepo
 - [ ] Single `sema serve` handles multiple project roots
-- [ ] Workspace-level index for monorepos
+- [x] Workspace-level index for monorepos (`--workspace` flag)
 - [ ] Cross-project symbol search
 
 ### v1.0 — Public release
