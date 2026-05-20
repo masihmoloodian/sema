@@ -61,6 +61,7 @@ class SemaStore:
                 "exports": str(c.exports),
                 "parent_name": c.parent_name or "",
                 "calls": ",".join(c.calls),
+                "imports": ",".join(c.imports),
             } for c in chunks],
             documents=[c.embed_text() for c in chunks],
         )

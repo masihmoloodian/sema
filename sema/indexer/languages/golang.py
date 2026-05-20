@@ -17,16 +17,40 @@ def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     source_bytes = source.encode("utf-8")
     tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
+    file_imports = _extract_file_imports(tree.root_node, source_bytes)
     for child in tree.root_node.children:
         if child.type == "function_declaration":
-            chunks.append(_make_function(child, source_bytes, file_path))
+            chunks.append(_make_function(child, source_bytes, file_path, file_imports))
         elif child.type == "method_declaration":
-            chunks.append(_make_method(child, source_bytes, file_path))
+            chunks.append(_make_method(child, source_bytes, file_path, file_imports))
         elif child.type == "type_declaration":
-            chunk = _make_type(child, source_bytes, file_path)
+            chunk = _make_type(child, source_bytes, file_path, file_imports)
             if chunk:
                 chunks.append(chunk)
     return chunks
+
+
+def _extract_file_imports(root: Node, source: bytes) -> list[str]:
+    """Collect import paths from import declarations."""
+    imports = []
+    for node in root.children:
+        if node.type == "import_declaration":
+            for child in node.children:
+                if child.type == "import_spec_list":
+                    for spec in child.children:
+                        if spec.type == "import_spec":
+                            for s in spec.children:
+                                if s.type == "interpreted_string_literal":
+                                    val = s.text.decode().strip('"')
+                                    if val:
+                                        imports.append(val)
+                elif child.type == "import_spec":
+                    for s in child.children:
+                        if s.type == "interpreted_string_literal":
+                            val = s.text.decode().strip('"')
+                            if val:
+                                imports.append(val)
+    return imports
 
 
 def _node_text(node: Node, source: bytes) -> str:
@@ -92,7 +116,7 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
         _collect_calls(child, source, calls, builtins)
 
 
-def _make_function(node: Node, source: bytes, file: str) -> Chunk:
+def _make_function(node: Node, source: bytes, file: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     result = _get_result(node, source)
@@ -110,10 +134,11 @@ def _make_function(node: Node, source: bytes, file: str) -> Chunk:
         end_line=node.end_point[0] + 1,
         exports=name[0].isupper() if name else False,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_method(node: Node, source: bytes, file: str) -> Chunk:
+def _make_method(node: Node, source: bytes, file: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_name(node)
     receiver = None
     params = ""
@@ -143,10 +168,11 @@ def _make_method(node: Node, source: bytes, file: str) -> Chunk:
         end_line=node.end_point[0] + 1,
         exports=name[0].isupper() if name else False,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_type(node: Node, source: bytes, file: str) -> Chunk | None:
+def _make_type(node: Node, source: bytes, file: str, file_imports: list[str] | None = None) -> Chunk | None:
     for child in node.children:
         if child.type == "type_spec":
             name_node = child.child_by_field_name("name")
@@ -168,5 +194,6 @@ def _make_type(node: Node, source: bytes, file: str) -> Chunk | None:
                 start_line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
                 exports=name[0].isupper() if name else False,
+                imports=file_imports or [],
             )
     return None

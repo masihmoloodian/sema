@@ -17,11 +17,31 @@ def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     source_bytes = source.encode("utf-8")
     tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
-    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None)
+    file_imports = _extract_file_imports(tree.root_node, source_bytes)
+    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None, file_imports=file_imports)
     return chunks
 
 
-def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None):
+def _extract_file_imports(root: Node, source: bytes) -> list[str]:
+    """Collect module names from top-level import statements."""
+    imports = []
+    for node in root.children:
+        if node.type == "import_statement":
+            # import foo, bar
+            for child in node.children:
+                if child.type == "dotted_name":
+                    imports.append(child.text.decode())
+        elif node.type == "import_from_statement":
+            # from foo.bar import baz  →  record "foo.bar"
+            for child in node.children:
+                if child.type in ("dotted_name", "relative_import"):
+                    imports.append(child.text.decode())
+                    break
+    return imports
+
+
+def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None, file_imports: list[str] | None = None):
+    fi = file_imports or []
     if node.type in ("function_definition", "decorated_definition"):
         target = node
         if node.type == "decorated_definition":
@@ -29,10 +49,10 @@ def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str |
                 if child.type == "function_definition":
                     target = child
                     break
-        chunks.append(_make_function(target, source, file, parent_name))
+        chunks.append(_make_function(target, source, file, parent_name, fi))
 
     elif node.type == "class_definition":
-        chunk = _make_class(node, source, file)
+        chunk = _make_class(node, source, file, fi)
         chunks.append(chunk)
         for child in node.children:
             if child.type == "block":
@@ -45,11 +65,11 @@ def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str |
                                 break
                     if actual.type == "function_definition":
                         chunks.append(
-                            _make_method(actual, source, file, parent_name=chunk.name)
+                            _make_method(actual, source, file, parent_name=chunk.name, file_imports=fi)
                         )
     else:
         for child in node.children:
-            _walk(child, source, file, chunks, parent_name)
+            _walk(child, source, file, chunks, parent_name, fi)
 
 
 def _node_text(node: Node, source: bytes) -> str:
@@ -128,7 +148,7 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
         _collect_calls(child, source, calls, builtins)
 
 
-def _make_function(node: Node, source: bytes, file: str, parent: str | None) -> Chunk:
+def _make_function(node: Node, source: bytes, file: str, parent: str | None, file_imports: list[str] | None = None) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     return_type = _get_return_annotation(node, source)
@@ -147,10 +167,11 @@ def _make_function(node: Node, source: bytes, file: str, parent: str | None) -> 
         docstring=_get_docstring(node, source),
         parent_name=parent,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_class(node: Node, source: bytes, file: str) -> Chunk:
+def _make_class(node: Node, source: bytes, file: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_name(node)
     start_line = node.start_point[0] + 1
     return Chunk(
@@ -164,10 +185,11 @@ def _make_class(node: Node, source: bytes, file: str) -> Chunk:
         start_line=node.start_point[0] + 1,
         end_line=node.end_point[0] + 1,
         docstring=_get_docstring(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_method(node: Node, source: bytes, file: str, parent_name: str) -> Chunk:
+def _make_method(node: Node, source: bytes, file: str, parent_name: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
     return_type = _get_return_annotation(node, source)
@@ -186,4 +208,5 @@ def _make_method(node: Node, source: bytes, file: str, parent_name: str) -> Chun
         docstring=_get_docstring(node, source),
         parent_name=parent_name,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )

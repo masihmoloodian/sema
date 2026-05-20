@@ -17,36 +17,52 @@ def extract_chunks(source: str, file_path: str) -> list[Chunk]:
     source_bytes = source.encode("utf-8")
     tree = parser.parse(source_bytes)
     chunks: list[Chunk] = []
-    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None)
+    file_imports = _extract_file_imports(tree.root_node, source_bytes)
+    _walk(tree.root_node, source_bytes, file_path, chunks, parent_name=None, file_imports=file_imports)
     return chunks
 
 
-def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None):
+def _extract_file_imports(root: Node, source: bytes) -> list[str]:
+    """Collect module specifiers from top-level import statements."""
+    imports = []
+    for node in root.children:
+        if node.type == "import_statement":
+            for child in node.children:
+                if child.type == "string":
+                    # strip surrounding quotes
+                    val = child.text.decode().strip("'\"`")
+                    if val:
+                        imports.append(val)
+    return imports
+
+
+def _walk(node: Node, source: bytes, file: str, chunks: list, parent_name: str | None, file_imports: list[str] | None = None):
+    fi = file_imports or []
     if node.type == "function_declaration":
-        chunks.append(_make_function(node, source, file, parent_name))
+        chunks.append(_make_function(node, source, file, parent_name, fi))
 
     elif node.type == "class_declaration":
-        chunk = _make_class(node, source, file)
+        chunk = _make_class(node, source, file, fi)
         chunks.append(chunk)
         for child in node.children:
             if child.type == "class_body":
                 for method in child.children:
                     if method.type == "method_definition":
                         chunks.append(
-                            _make_method(method, source, file, parent_name=chunk.name)
+                            _make_method(method, source, file, parent_name=chunk.name, file_imports=fi)
                         )
 
     elif node.type == "interface_declaration":
-        chunks.append(_make_interface(node, source, file))
+        chunks.append(_make_interface(node, source, file, fi))
 
     elif node.type == "lexical_declaration":
         arrow = _find_arrow_function(node)
         if arrow:
-            chunks.append(_make_arrow_fn(node, arrow, source, file, parent_name))
+            chunks.append(_make_arrow_fn(node, arrow, source, file, parent_name, fi))
 
     else:
         for child in node.children:
-            _walk(child, source, file, chunks, parent_name)
+            _walk(child, source, file, chunks, parent_name, fi)
 
 
 def _node_text(node: Node, source: bytes) -> str:
@@ -102,7 +118,7 @@ def _find_arrow_function(node: Node) -> Node | None:
     return None
 
 
-def _make_function(node: Node, source: str, file: str, parent: str | None) -> Chunk:
+def _make_function(node: Node, source: str, file: str, parent: str | None, file_imports: list[str] | None = None) -> Chunk:
     name = _get_identifier(node)
     params = _get_params(node, source)
     return_type = _get_return_type(node, source)
@@ -122,10 +138,11 @@ def _make_function(node: Node, source: str, file: str, parent: str | None) -> Ch
         exports=_is_exported(node),
         parent_name=parent,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_class(node: Node, source: str, file: str) -> Chunk:
+def _make_class(node: Node, source: str, file: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_identifier(node)
     signature = f"class {name}"
     start_line = node.start_point[0] + 1
@@ -141,10 +158,11 @@ def _make_class(node: Node, source: str, file: str) -> Chunk:
         end_line=node.end_point[0] + 1,
         docstring=_get_jsdoc(node, source),
         exports=_is_exported(node),
+        imports=file_imports or [],
     )
 
 
-def _make_method(node: Node, source: str, file: str, parent_name: str) -> Chunk:
+def _make_method(node: Node, source: str, file: str, parent_name: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_identifier(node)
     params = _get_params(node, source)
     return_type = _get_return_type(node, source)
@@ -162,10 +180,11 @@ def _make_method(node: Node, source: str, file: str, parent_name: str) -> Chunk:
         end_line=node.end_point[0] + 1,
         parent_name=parent_name,
         calls=_extract_calls(node, source),
+        imports=file_imports or [],
     )
 
 
-def _make_interface(node: Node, source: str, file: str) -> Chunk:
+def _make_interface(node: Node, source: str, file: str, file_imports: list[str] | None = None) -> Chunk:
     name = _get_identifier(node)
     start_line = node.start_point[0] + 1
     return Chunk(
@@ -179,6 +198,7 @@ def _make_interface(node: Node, source: str, file: str) -> Chunk:
         start_line=node.start_point[0] + 1,
         end_line=node.end_point[0] + 1,
         exports=_is_exported(node),
+        imports=file_imports or [],
     )
 
 
@@ -237,7 +257,7 @@ def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozens
 
 
 def _make_arrow_fn(
-    decl_node: Node, fn_node: Node, source: str, file: str, parent: str | None
+    decl_node: Node, fn_node: Node, source: str, file: str, parent: str | None, file_imports: list[str] | None = None
 ) -> Chunk:
     name = _get_arrow_name(decl_node)
     params = _get_params(fn_node, source)
@@ -257,4 +277,5 @@ def _make_arrow_fn(
         exports=_is_exported(decl_node),
         parent_name=parent,
         calls=_extract_calls(fn_node, source),
+        imports=file_imports or [],
     )

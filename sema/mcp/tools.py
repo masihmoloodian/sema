@@ -136,7 +136,11 @@ def search_code(query: str, top_k: int = 5) -> str:
         results = semantic[:top_k]
 
     if not results:
-        return "No results found. The codebase may not be indexed. Run: sema index ."
+        return (
+            f"No results found for '{query}'.\n"
+            "If the codebase was recently modified, the index may be stale — run: sema index . --reset\n"
+            "If this is a new project, run: sema index ."
+        )
 
     lines = [f"Found {len(results)} results for '{query}':\n"]
     for r in results:
@@ -145,6 +149,14 @@ def search_code(query: str, top_k: int = 5) -> str:
             f"  {r['file']}::{r['name']}  [line {r['start_line']}]  ({score_pct}% match)\n"
             f"    {r['type']}: {r['signature']}\n"
         )
+
+    top_score = results[0]["score"]
+    if top_score < 0.35:
+        lines.append(
+            "\nNote: low confidence scores — results may not be relevant. "
+            "If the symbol was recently added, re-index with: sema index ."
+        )
+
     return "\n".join(lines)
 
 
@@ -163,7 +175,13 @@ def get_code(symbol_name: str) -> str:
 
     results = store.get_by_name(symbol_name)
     if not results:
-        return f"Symbol '{symbol_name}' not found. Use search_code() to find it first."
+        return (
+            f"Symbol '{symbol_name}' not found in index.\n"
+            "Possible causes:\n"
+            "  • The symbol name is misspelled — use search_code() to find the correct name\n"
+            "  • The file was added or renamed after the last index — run: sema index .\n"
+            "  • The symbol is defined dynamically or in an unsupported language"
+        )
 
     parts = []
     for r in results:
@@ -364,7 +382,33 @@ def explain_file(file_path: str) -> str:
     functions = [m for m in file_chunks if m["chunk_type"] == "function"]
     classes = [m for m in file_chunks if m["chunk_type"] == "class"]
 
+    # Collect imports — stored on every chunk, deduplicate and sort
+    all_imports: list[str] = []
+    seen: set[str] = set()
+    for m in file_chunks:
+        for imp in m.get("imports", "").split(","):
+            imp = imp.strip()
+            if imp and imp not in seen:
+                seen.add(imp)
+                all_imports.append(imp)
+    all_imports.sort()
+
     lines = [f"File: {file_path}\n"]
+
+    if all_imports:
+        # Split into relative (project deps) and package (external) imports
+        relative = [i for i in all_imports if i.startswith(".")]
+        packages = [i for i in all_imports if not i.startswith(".")]
+        if relative:
+            lines.append("Imports (project):")
+            for i in relative:
+                lines.append(f"  {i}")
+        if packages:
+            lines.append("Imports (packages):")
+            for i in packages:
+                lines.append(f"  {i}")
+        lines.append("")
+
     if exports:
         lines.append(f"Exports ({len(exports)}):")
         for e in exports[:10]:
