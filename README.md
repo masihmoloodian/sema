@@ -629,8 +629,8 @@ rm -rf /your-project/.sema/
 ## CLI reference
 
 ```
-sema index .                                  Index the current directory
-sema index . --reset                          Delete existing index and re-index from scratch
+sema index .                                  Index the current directory (skips unchanged files)
+sema index . --reset                          Delete existing index and re-index everything from scratch
 sema index . --workspace my.code-workspace    Index only the folders listed in a VS Code workspace file
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
@@ -787,11 +787,12 @@ sema/
 │   │
 │   ├── store/
 │   │   ├── schema.py               # Chunk dataclass — the core data model
-│   │   └── chroma.py               # ChromaDB embedded client wrapper
+│   │   ├── chroma.py               # ChromaDB embedded client wrapper
+│   │   └── hashes.py               # SHA-256 hash store for incremental indexing
 │   │
 │   ├── mcp/
 │   │   ├── server.py               # MCP stdio server entry point
-│   │   └── tools.py                # all 5 MCP tool implementations
+│   │   └── tools.py                # all 6 MCP tool implementations
 │   │
 │   └── utils/
 │       ├── file_walker.py          # walks project, respects .gitignore
@@ -854,14 +855,19 @@ sema watch
 # Ctrl+C to stop
 ```
 
-If you prefer manual re-indexing:
+If you prefer manual re-indexing, sema tracks a SHA-256 hash of every indexed file in `.sema/hashes.json`. Running `sema index .` again only re-embeds files that actually changed — unchanged files are skipped instantly:
 
 ```bash
-# After large refactors or many file changes
-sema index . --reset
-
-# After adding a few new files
 sema index .
+# ✔ Indexed 2 files (847 unchanged, skipped)
+# ✔ Generated 11 chunks
+```
+
+Use `--reset` to force a full re-index from scratch (also clears the hash store):
+
+```bash
+# Force full re-index — use after upgrading sema or changing .gitignore
+sema index . --reset
 ```
 
 You do **not** need to re-index when:
