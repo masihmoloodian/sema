@@ -93,23 +93,31 @@ def init(uninstall: bool, dry_run: bool):
     index_path = project_root / DEFAULT_INDEX_DIR
 
     if uninstall:
-        settings_file = project_root / ".claude" / "settings.json"
-        if not settings_file.exists():
-            console.print("[dim]No .claude/settings.json found — nothing to remove.[/dim]")
-            return
-        existing = json.loads(settings_file.read_text())
-        if "sema" not in existing.get("mcpServers", {}):
-            console.print("[dim]sema is not registered in .claude/settings.json[/dim]")
-            return
-        if dry_run:
-            console.print(f"[dim]Would remove mcpServers.sema from {settings_file}[/dim]")
-            return
-        del existing["mcpServers"]["sema"]
-        if not existing["mcpServers"]:
-            del existing["mcpServers"]
-        settings_file.write_text(json.dumps(existing, indent=2))
-        console.print(f"[yellow]✔[/yellow] Removed sema from {settings_file}")
-        console.print("Reload VS Code to apply the change.")
+        candidates = [
+            project_root / ".claude" / "settings.json",
+            Path.home() / ".claude" / "settings.json",
+        ]
+        removed_any = False
+        for settings_file in candidates:
+            if not settings_file.exists():
+                continue
+            existing = json.loads(settings_file.read_text())
+            if "sema" not in existing.get("mcpServers", {}):
+                continue
+            if dry_run:
+                console.print(f"[dim]Would remove mcpServers.sema from {settings_file}[/dim]")
+                removed_any = True
+                continue
+            del existing["mcpServers"]["sema"]
+            if not existing["mcpServers"]:
+                del existing["mcpServers"]
+            settings_file.write_text(json.dumps(existing, indent=2))
+            console.print(f"[yellow]✔[/yellow] Removed sema from {settings_file}")
+            removed_any = True
+        if not removed_any:
+            console.print("[dim]sema is not registered in any Claude Code config.[/dim]")
+        else:
+            console.print("Reload VS Code to apply the change.")
         return
 
     if not index_path.exists():
