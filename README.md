@@ -931,8 +931,8 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 ### v0.3 — Incremental indexing
 - [x] File watcher: `sema watch` re-indexes changed files automatically
 - [x] Workspace support: `sema index --workspace` and `sema watch --workspace` index only listed folders with correct base paths
+- [x] Incremental indexing: SHA-256 hash store skips unchanged files; `sema index .` on an already-indexed project is ~20× faster
 - [ ] Git hook: `sema init --watch` installs a post-commit hook
-- [ ] Only re-embed files changed since last index (tracked via git hash)
 
 ### v0.4 — More AST-aware parsers
 - [ ] Rust (`.rs`) — tree-sitter-rust

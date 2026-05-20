@@ -17,6 +17,7 @@ from ..indexer.parser import get_supported_extensions
 from ..indexer.chunker import index_file
 from ..indexer.embedder import Embedder
 from ..store.chroma import SemaStore
+from ..store.hashes import FileHashStore
 
 
 _DEBOUNCE_SECONDS = 0.3
@@ -30,12 +31,14 @@ class _Handler(FileSystemEventHandler):
         embedder: Embedder,
         on_indexed,   # callback(path, n_chunks) — used by CLI to print status
         base_root: Path | None = None,
+        hash_store: FileHashStore | None = None,
     ):
         self._root = watch_root.resolve()
         self._base = (base_root or watch_root).resolve()
         self._store = store
         self._embedder = embedder
         self._on_indexed = on_indexed
+        self._hash_store = hash_store
         self._extensions = get_supported_extensions()
         self._timers: dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
@@ -96,6 +99,9 @@ class _Handler(FileSystemEventHandler):
         if deleted:
             rel = str(p.relative_to(self._base))
             self._store.delete_by_file(rel)
+            if self._hash_store is not None:
+                self._hash_store.remove(rel)
+                self._hash_store.save()
             self._on_indexed(p, -1)  # -1 signals deletion
             return
 
@@ -106,7 +112,7 @@ class _Handler(FileSystemEventHandler):
             return
 
         try:
-            n = index_file(p, self._root, self._store, self._embedder, base_root=self._base)
+            n = index_file(p, self._root, self._store, self._embedder, base_root=self._base, hash_store=self._hash_store)
             self._on_indexed(p, n)
         except Exception as e:
             self._on_indexed(p, 0)  # signal skipped so callers stay informed
@@ -119,12 +125,15 @@ def start_watch(
     embedder: Embedder,
     on_indexed=None,
     base_root: Path | None = None,
+    hash_store: "FileHashStore | None" = None,
 ) -> None:
     """
     Block until Ctrl+C, re-indexing any file that changes.
 
     watch_dirs: single path or list of paths to watch (workspace = list of folders).
     base_root: root for relative paths in the index; defaults to first watch dir.
+    hash_store: if provided, hashes are updated after each re-index so that a
+                subsequent `sema index .` skips files the watcher already handled.
     on_indexed(path, n_chunks) is called after each file is processed.
     n_chunks == -1 means the file was deleted.
     """
@@ -136,7 +145,7 @@ def start_watch(
 
     observer = Observer()
     for watch_dir in watch_dirs:
-        handler = _Handler(watch_dir, store, embedder, on_indexed, base_root=base_root)
+        handler = _Handler(watch_dir, store, embedder, on_indexed, base_root=base_root, hash_store=hash_store)
         observer.schedule(handler, str(watch_dir), recursive=True)
     observer.start()
 

@@ -14,6 +14,7 @@ class SemaStore:
     COLLECTION_NAME = "sema_chunks"
 
     def __init__(self, index_path: Path):
+        self.index_path = index_path
         self.client = chromadb.PersistentClient(path=str(index_path))
         self.collection = self.client.get_or_create_collection(
             name=self.COLLECTION_NAME,

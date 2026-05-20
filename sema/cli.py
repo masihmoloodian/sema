@@ -62,7 +62,7 @@ def index(path: str, workspace: str | None, reset: bool, verbose: bool):
     store = SemaStore(index_path)
     embedder = Embedder()
 
-    total = {"files": 0, "chunks": 0, "languages": {}}
+    total = {"files": 0, "chunks": 0, "languages": {}, "skipped": 0}
     base_root = index_root if workspace else None
     for folder in folders:
         if workspace:
@@ -70,11 +70,14 @@ def index(path: str, workspace: str | None, reset: bool, verbose: bool):
         stats = index_project(folder, store, embedder, reset=reset, base_root=base_root)
         total["files"] += stats["files"]
         total["chunks"] += stats["chunks"]
+        total["skipped"] += stats.get("skipped", 0)
         for lang, count in stats["languages"].items():
             total["languages"][lang] = total["languages"].get(lang, 0) + count
         reset = False  # only wipe on first folder to avoid clearing previous results
 
-    console.print(f"\n[green]✔[/green] Indexed [bold]{total['files']}[/bold] files")
+    skipped = total["skipped"]
+    skip_note = f" [dim]({skipped} unchanged, skipped)[/dim]" if skipped else ""
+    console.print(f"\n[green]✔[/green] Indexed [bold]{total['files']}[/bold] files{skip_note}")
     console.print(f"[green]✔[/green] Generated [bold]{total['chunks']}[/bold] chunks")
     for lang, count in total["languages"].items():
         console.print(f"    {lang}: {count}")
@@ -281,6 +284,7 @@ def watch(path: str, workspace: str | None):
     import datetime
     from .indexer.embedder import Embedder
     from .store.chroma import SemaStore
+    from .store.hashes import FileHashStore
     from .utils.watcher import start_watch
 
     if workspace:
@@ -307,6 +311,7 @@ def watch(path: str, workspace: str | None):
 
     store = SemaStore(index_path)
     embedder = Embedder()
+    hash_store = FileHashStore(index_path.parent)
 
     console.print("[dim]Re-indexing changed files automatically. Press Ctrl+C to stop.[/dim]\n")
 
@@ -323,7 +328,7 @@ def watch(path: str, workspace: str | None):
         else:
             console.print(f"[dim]{ts}[/dim]  [green]indexed[/green]   {rel}  [dim]({n_chunks} chunks)[/dim]")
 
-    start_watch(watch_dirs, store, embedder, on_indexed=on_indexed, base_root=base_root)
+    start_watch(watch_dirs, store, embedder, on_indexed=on_indexed, base_root=base_root, hash_store=hash_store)
 
 
 @main.command()
