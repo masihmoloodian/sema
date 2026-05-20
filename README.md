@@ -925,8 +925,8 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 ### v0.2 — Tool improvements
 - [x] `find_usages` backed by grep for exact reference matching
 - [x] Call graph: `impact_analysis(symbol, depth)` — callers + callees, BFS multi-level, qualified names, builtin filtering, inverted index cache
-- [ ] `explain_file` includes import graph
-- [ ] Better error messages when index is stale
+- [x] `explain_file` includes import graph (project vs package imports, split by relative/absolute)
+- [x] Better error messages when index is stale (empty results, low confidence, symbol not found)
 
 ### v0.3 — Incremental indexing
 - [x] File watcher: `sema watch` re-indexes changed files automatically
