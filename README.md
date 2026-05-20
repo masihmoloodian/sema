@@ -35,6 +35,7 @@ Index once. Claude searches forever.
   - [Update sema](#update-sema-to-the-latest-version)
 - [CLI reference](#cli-reference)
 - [MCP tools](#mcp-tools)
+  - [impact_analysis — call graph](#impact_analysis----call-graph)
 - [Supported languages](#supported-languages)
 - [Project structure](#project-structure)
 - [Configuration](#configuration)
@@ -341,13 +342,15 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 | Find where a symbol is called or referenced | `find_usages("symbolName")` |
 | Understand what a file exports | `explain_file("path/to/file.ts")` |
 | Understand the overall architecture | `repo_map()` |
+| See what a function calls and what calls it | `impact_analysis("symbolName")` |
 
 ### Rules
 
 1. **Always call `search_code()` before using Bash find/grep or Read to explore.**
 2. If `search_code()` returns relevant results, use `get_code()` for the full body — do not Read the whole file.
-3. If sema returns no results or the results look wrong, fall back to normal file navigation — the index may be stale or the symbol may not exist.
-4. Only call `repo_map()` when you genuinely need an architecture overview — it costs ~400–800 tokens.
+3. Before changing a function, call `impact_analysis()` to understand the blast radius.
+4. If sema returns no results or the results look wrong, fall back to normal file navigation — the index may be stale or the symbol may not exist.
+5. Only call `repo_map()` when you genuinely need an architecture overview — it costs ~400–800 tokens.
 ```
 
 ---
@@ -398,8 +401,9 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 | Find where a symbol is called or referenced | `find_usages("symbolName")` |
 | Understand what a file exports | `explain_file("path/to/file.ts")` |
 | Understand the overall architecture | `repo_map()` |
+| See what a function calls and what calls it | `impact_analysis("symbolName")` |
 
-**Always call `search_code()` before using Bash find/grep or Read to explore.**
+**Always call `search_code()` before using Bash find/grep or Read to explore. Before changing a function, call `impact_analysis()` to understand the blast radius.**
 EOF
 done
 ```
@@ -652,6 +656,55 @@ These are the tools Claude calls during a session. You never call them directly.
 | `repo_map()` | — | Compressed architecture overview: files + exported symbols | ~400–800 |
 | `find_usages(symbol)` | Symbol name | Call sites and references (signatures only) | ~150–300 |
 | `explain_file(path)` | Relative file path | File summary: exports, classes, functions — no source code | ~100–200 |
+| `impact_analysis(symbol)` | Symbol name | Call graph: what it calls + what calls it, up to 3 levels deep | ~100–400 |
+
+### `impact_analysis` — call graph
+
+`impact_analysis` answers two questions at once: *what does this function call?* and *what calls this function?* — traversed up to `depth` levels in both directions. Use it before changing a function to understand the blast radius.
+
+```
+impact_analysis("validateToken", depth=2)
+
+Impact analysis for 'validateToken':
+
+Calls (1 symbols, 1 level(s) deep):
+  Level 1:
+    → atob
+
+Called by (3 callers, 1 level(s) up):
+  Level 1:
+    src/auth/jwt.ts::refreshToken  [line 29]
+      function: refreshToken(userId: string, token: string): Promise<TokenPair>
+    src/auth/middleware.ts::requireAuth  [line 3]
+      function: requireAuth(req: any, res: any, next: any): void
+    src/auth/middleware.ts::optionalAuth  [line 18]
+      function: optionalAuth(req: any, res: any, next: any): void
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `symbol_name` | string | required | Exact function or method name |
+| `depth` | int | 2 | Levels to traverse in both directions (1–3) |
+| `file_path` | string | — | Narrow to a specific file when multiple files define the same symbol name |
+
+**How it works:**
+
+At index time, each function's AST is walked to extract every call site. Calls are stored as qualified names where possible (`jwt.verify`, `uuid.uuid4`) or bare names otherwise (`validateToken`). Common language builtins (`len`, `console.log`, `fmt.Printf`) are filtered out so the graph only shows your own symbols.
+
+At query time the call graph is traversed breadth-first in both directions:
+- **Callees** — what `symbol` calls, then what those call (downward, up to `depth` levels)
+- **Callers** — what calls `symbol`, then what calls those callers (upward, up to `depth` levels)
+
+Caller lookups are backed by an in-memory inverted index built on first use — subsequent calls are sub-millisecond regardless of codebase size. Qualified-name queries also match suffix: searching for `verify` returns callers that recorded `jwt.verify`.
+
+**When to use it:**
+
+- Before refactoring a function — see everything that will break
+- Before changing a function signature — find all callers at once
+- When debugging — trace how a call propagates through your stack
+- Code review — quickly understand the scope of a change
 
 ---
 
@@ -724,10 +777,11 @@ sema/
 │   │   ├── parser.py               # parser registry — register() for new formats
 │   │   ├── chunker.py              # orchestrates parse → embed → store
 │   │   ├── embedder.py             # SBERT wrapper (lazy model load, batch embedding)
+│   │   ├── builtins.py             # per-language builtin sets filtered from call graph
 │   │   └── languages/
-│   │       ├── typescript.py       # tree-sitter TS/JS chunk extraction
-│   │       ├── python.py           # tree-sitter Python chunk extraction
-│   │       ├── golang.py           # tree-sitter Go chunk extraction
+│   │       ├── typescript.py       # tree-sitter TS/JS chunk extraction + call extraction
+│   │       ├── python.py           # tree-sitter Python chunk extraction + call extraction
+│   │       ├── golang.py           # tree-sitter Go chunk extraction + call extraction
 │   │       ├── markdown.py         # heading-based section chunker
 │   │       └── generic.py          # sliding-window text chunker (json, yaml, env, css…)
 │   │
@@ -822,7 +876,7 @@ You do **not** need to re-index when:
 Known limitations in the current version (v0.1.x):
 
 - **AST-aware parsers for TypeScript, Python, Go only** — Ruby, Rust, Java, C#, and others fall back to generic text chunking (searchable, but no symbol-level granularity)
-- **No call graph** — sema knows what each function does, but not which functions call which; Claude infers this from bodies
+- **Call graph is name-based** — calls are matched by symbol name, not by resolved reference; two functions with the same name in different files are indistinguishable to the graph
 - **`find_usages` is approximate** — uses semantic similarity, not AST-level reference tracking; may miss some call sites
 - **Single project per server** — one `sema serve` process serves one project root
 - **Model fixed at index time** — changing the embedding model requires a full re-index

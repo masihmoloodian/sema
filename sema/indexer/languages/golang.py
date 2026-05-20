@@ -60,6 +60,38 @@ def _get_result(node: Node, source: bytes) -> str | None:
     return None
 
 
+def _extract_calls(node: Node, source: bytes) -> list[str]:
+    """Collect called symbols within a node's subtree, qualified where possible."""
+    from ..builtins import GO_BUILTINS
+    calls: set[str] = set()
+    _collect_calls(node, source, calls, GO_BUILTINS)
+    return sorted(calls)
+
+
+def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+    if node.type == "call_expression":
+        fn = node.children[0] if node.children else None
+        if fn is not None:
+            if fn.type == "identifier":
+                name = fn.text.decode()
+                if name not in builtins:
+                    calls.add(name)
+            elif fn.type == "selector_expression":
+                obj_node = fn.children[0] if fn.children else None
+                method = None
+                for child in fn.children:
+                    if child.type == "field_identifier":
+                        method = child.text.decode()
+                        break
+                if method and method not in builtins:
+                    if obj_node and obj_node.type == "identifier":
+                        calls.add(f"{obj_node.text.decode()}.{method}")
+                    else:
+                        calls.add(method)
+    for child in node.children:
+        _collect_calls(child, source, calls, builtins)
+
+
 def _make_function(node: Node, source: bytes, file: str) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
@@ -77,6 +109,7 @@ def _make_function(node: Node, source: bytes, file: str) -> Chunk:
         start_line=node.start_point[0] + 1,
         end_line=node.end_point[0] + 1,
         exports=name[0].isupper() if name else False,
+        calls=_extract_calls(node, source),
     )
 
 
@@ -109,6 +142,7 @@ def _make_method(node: Node, source: bytes, file: str) -> Chunk:
         start_line=node.start_point[0] + 1,
         end_line=node.end_point[0] + 1,
         exports=name[0].isupper() if name else False,
+        calls=_extract_calls(node, source),
     )
 
 

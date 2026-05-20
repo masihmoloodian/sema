@@ -121,6 +121,7 @@ def _make_function(node: Node, source: str, file: str, parent: str | None) -> Ch
         docstring=_get_jsdoc(node, source),
         exports=_is_exported(node),
         parent_name=parent,
+        calls=_extract_calls(node, source),
     )
 
 
@@ -160,6 +161,7 @@ def _make_method(node: Node, source: str, file: str, parent_name: str) -> Chunk:
         start_line=node.start_point[0] + 1,
         end_line=node.end_point[0] + 1,
         parent_name=parent_name,
+        calls=_extract_calls(node, source),
     )
 
 
@@ -190,6 +192,50 @@ def _get_arrow_name(decl_node: Node) -> str:
     return "unknown"
 
 
+def _extract_calls(node: Node, source: bytes) -> list[str]:
+    """Collect called symbols within a node's subtree, qualified where possible."""
+    from ..builtins import TS_BUILTINS
+    calls: set[str] = set()
+    _collect_calls(node, source, calls, TS_BUILTINS)
+    return sorted(calls)
+
+
+def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+    if node.type == "call_expression":
+        fn = node.children[0] if node.children else None
+        if fn is not None:
+            if fn.type == "identifier":
+                name = fn.text.decode()
+                if name not in builtins:
+                    calls.add(name)
+            elif fn.type == "member_expression":
+                obj_node = fn.children[0] if fn.children else None
+                prop = None
+                for child in fn.children:
+                    if child.type == "property_identifier":
+                        prop = child.text.decode()
+                        break
+                if prop and prop not in builtins:
+                    # Qualify as "obj.method" when object is a plain identifier (not `this`)
+                    if obj_node and obj_node.type == "identifier":
+                        obj = obj_node.text.decode()
+                        if obj == "this":
+                            calls.add(prop)
+                        else:
+                            calls.add(f"{obj}.{prop}")
+                    else:
+                        calls.add(prop)
+    elif node.type == "new_expression":
+        for child in node.children:
+            if child.type in ("identifier", "type_identifier"):
+                name = child.text.decode()
+                if name not in builtins:
+                    calls.add(name)
+                break
+    for child in node.children:
+        _collect_calls(child, source, calls, builtins)
+
+
 def _make_arrow_fn(
     decl_node: Node, fn_node: Node, source: str, file: str, parent: str | None
 ) -> Chunk:
@@ -210,4 +256,5 @@ def _make_arrow_fn(
         end_line=decl_node.end_point[0] + 1,
         exports=_is_exported(decl_node),
         parent_name=parent,
+        calls=_extract_calls(fn_node, source),
     )

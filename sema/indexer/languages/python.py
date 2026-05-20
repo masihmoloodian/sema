@@ -93,6 +93,41 @@ def _get_docstring(node: Node, source: bytes) -> str | None:
     return None
 
 
+def _extract_calls(node: Node, source: bytes) -> list[str]:
+    """Collect called symbols within a node's subtree, qualified where possible."""
+    from ..builtins import PY_BUILTINS
+    calls: set[str] = set()
+    _collect_calls(node, source, calls, PY_BUILTINS)
+    return sorted(calls)
+
+
+def _collect_calls(node: Node, source: bytes, calls: set[str], builtins: frozenset[str]) -> None:
+    if node.type == "call":
+        fn = node.children[0] if node.children else None
+        if fn is not None:
+            if fn.type == "identifier":
+                name = fn.text.decode()
+                if name not in builtins:
+                    calls.add(name)
+            elif fn.type == "attribute":
+                # attribute: object . method — last child is the method name
+                last = fn.children[-1] if fn.children else None
+                obj_node = fn.children[0] if fn.children else None
+                if last and last.type == "identifier":
+                    method = last.text.decode()
+                    if method not in builtins:
+                        if obj_node and obj_node.type == "identifier":
+                            obj = obj_node.text.decode()
+                            if obj in ("self", "cls"):
+                                calls.add(method)
+                            else:
+                                calls.add(f"{obj}.{method}")
+                        else:
+                            calls.add(method)
+    for child in node.children:
+        _collect_calls(child, source, calls, builtins)
+
+
 def _make_function(node: Node, source: bytes, file: str, parent: str | None) -> Chunk:
     name = _get_name(node)
     params = _get_params(node, source)
@@ -111,6 +146,7 @@ def _make_function(node: Node, source: bytes, file: str, parent: str | None) -> 
         end_line=node.end_point[0] + 1,
         docstring=_get_docstring(node, source),
         parent_name=parent,
+        calls=_extract_calls(node, source),
     )
 
 
@@ -149,4 +185,5 @@ def _make_method(node: Node, source: bytes, file: str, parent_name: str) -> Chun
         end_line=node.end_point[0] + 1,
         docstring=_get_docstring(node, source),
         parent_name=parent_name,
+        calls=_extract_calls(node, source),
     )

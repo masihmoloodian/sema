@@ -27,6 +27,7 @@ class Chunk:
     imports: list[str] = field(default_factory=list)
     exports: bool = False
     parent_name: str | None = None   # for methods: the class name
+    calls: list[str] = field(default_factory=list)  # symbols called by this chunk
 
     def embed_text(self) -> str:
         """Text to embed — signature + context, not full body."""

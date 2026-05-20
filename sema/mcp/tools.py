@@ -252,6 +252,99 @@ def find_usages(symbol_name: str) -> str:
 
 
 @mcp.tool()
+def impact_analysis(
+    symbol_name: str,
+    depth: int = 2,
+    file_path: str | None = None,
+) -> str:
+    """
+    Show what a function calls (callees) and what calls it (callers), up to
+    `depth` levels in both directions. Useful for understanding the blast
+    radius before changing a function.
+
+    Args:
+        symbol_name: Exact name of the function or method (e.g. "validateToken")
+        depth: Levels to traverse in both directions (1-3, default 2)
+        file_path: Narrow to a specific file when multiple files define the
+                   same symbol name (e.g. "src/auth/jwt.ts"). Affects which
+                   implementation's callees are shown.
+    """
+    store = _require_store()
+    depth = max(1, min(depth, 3))
+
+    header = f"Impact analysis for '{symbol_name}'"
+    if file_path:
+        header += f"  [{file_path}]"
+    lines = [header + ":\n"]
+
+    # ── Callees: BFS downward ─────────────────────────────────────────────────
+    callee_levels: list[list[str]] = []
+    callee_visited: set[str] = {symbol_name}
+    callee_frontier = store.get_callees(symbol_name, file_path=file_path)
+    callee_visited.update(callee_frontier)
+
+    if callee_frontier:
+        callee_levels.append(callee_frontier)
+        for _ in range(depth - 1):
+            next_callees: list[str] = []
+            for sym in callee_frontier:
+                for c in store.get_callees(sym):
+                    if c not in callee_visited:
+                        callee_visited.add(c)
+                        next_callees.append(c)
+            if not next_callees:
+                break
+            callee_levels.append(next_callees)
+            callee_frontier = next_callees
+
+    total_callees = sum(len(lv) for lv in callee_levels)
+    if callee_levels:
+        lines.append(f"Calls ({total_callees} symbols, {len(callee_levels)} level(s) deep):")
+        for i, lv in enumerate(callee_levels, 1):
+            lines.append(f"  Level {i}:")
+            for c in lv[:20]:
+                lines.append(f"    → {c}")
+        lines.append("")
+    else:
+        lines.append("Calls: (none detected — re-index to populate call graph)\n")
+
+    # ── Callers: BFS upward ───────────────────────────────────────────────────
+    caller_levels: list[list[dict]] = []
+    caller_visited: set[str] = {symbol_name}
+    frontier = [symbol_name]
+
+    for _ in range(depth):
+        next_frontier: list[str] = []
+        level_hits: list[dict] = []
+        for sym in frontier:
+            for caller in store.get_callers(sym):
+                if caller["name"] not in caller_visited:
+                    caller_visited.add(caller["name"])
+                    next_frontier.append(caller["name"])
+                    level_hits.append(caller)
+        if not level_hits:
+            break
+        caller_levels.append(level_hits)
+        frontier = next_frontier
+
+    total_callers = sum(len(lv) for lv in caller_levels)
+    if caller_levels:
+        lines.append(f"Called by ({total_callers} callers, {len(caller_levels)} level(s) up):")
+        for i, lv in enumerate(caller_levels, 1):
+            lines.append(f"  Level {i}:")
+            for c in lv:
+                lines.append(
+                    f"    {c['file']}::{c['name']}  [line {c['start_line']}]\n"
+                    f"      {c['chunk_type']}: {c['signature']}"
+                )
+        lines.append("")
+    else:
+        lines.append("Called by: (no indexed callers found)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def explain_file(file_path: str) -> str:
     """
     Returns a summary of a file: its purpose, exports, and key dependencies.
