@@ -29,6 +29,7 @@ Index once. Claude searches forever.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [VS Code workspace setup](#vs-code-workspace-setup)
 - [Troubleshooting](#troubleshooting)
 - [Managing sema](#managing-sema)
   - [Update sema](#update-sema-to-the-latest-version)
@@ -303,6 +304,7 @@ cd your-project
 /path/to/sema/venv/bin/sema index .
 
 # 3. Register sema as an MCP server with Claude Code
+#    (runs `claude mcp add sema -s user` internally)
 /path/to/sema/venv/bin/sema init
 
 # 4. Reload VS Code
@@ -310,7 +312,7 @@ cd your-project
 
 # 5. Verify the connection
 #    Open a new chat in Claude Code and type /mcp
-#    You should see:  Local (1)  sema  ✓ Connected
+#    You should see:  sema  ✓ connected
 
 # 6. (Optional) Keep the index up to date automatically
 #    Run this in a separate terminal while you work:
@@ -350,63 +352,212 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 
 ---
 
+## VS Code workspace setup
+
+A VS Code workspace (`.code-workspace` file) groups multiple project folders under one window. Sema supports this with two extra flags.
+
+### Step-by-step
+
+**1. Index only the workspace folders — not the whole parent directory**
+
+```bash
+cd /path/to/workspace          # the directory containing your .code-workspace file
+sema index . --workspace my-project.code-workspace
+```
+
+The `--workspace` flag reads the `.code-workspace` file and indexes only the listed folders. Without it, `sema index .` would walk everything in the parent directory including unrelated repos.
+
+Paths in the index include the project folder name (`backend/src/auth.ts`, not just `src/auth.ts`), so results are always unambiguous across projects.
+
+**2. Register with Claude Code**
+
+```bash
+sema init
+```
+
+This runs `claude mcp add sema -s user` under the hood, which registers sema at the user level — visible in every project and workspace, not just one folder.
+
+**3. Add CLAUDE.md to each project folder**
+
+Claude Code anchors CLAUDE.md to each project's git root — not to the workspace parent directory. A CLAUDE.md at `/workspace/CLAUDE.md` is invisible to Claude when you're working in `/workspace/backend/`.
+
+Create a CLAUDE.md in each project folder:
+
+```bash
+# Run from the workspace root
+for dir in backend frontend bo; do
+  cat > $dir/CLAUDE.md << 'EOF'
+## Codebase navigation
+
+This project is indexed by sema. Use sema tools to locate code before reading files.
+
+| Goal | Tool |
+|---|---|
+| Find a function, class, or method | `search_code("natural language description")` |
+| Read the full body of a known symbol | `get_code("exactSymbolName")` |
+| Find where a symbol is called or referenced | `find_usages("symbolName")` |
+| Understand what a file exports | `explain_file("path/to/file.ts")` |
+| Understand the overall architecture | `repo_map()` |
+
+**Always call `search_code()` before using Bash find/grep or Read to explore.**
+EOF
+done
+```
+
+**4. Watch for changes across all workspace folders**
+
+```bash
+sema watch . --workspace my-project.code-workspace
+```
+
+A file save in any project triggers incremental re-indexing automatically.
+
+---
+
 ## Troubleshooting
 
 ### sema not listed in `/mcp`
 
-**Check 1 — Did you run `sema init` from the right directory?**
-
-`sema init` writes to `.claude/settings.json` in your *current working directory*. Claude Code only reads the `.claude/settings.json` that lives in the root of the project it has open. If you ran `sema init` from the wrong directory, the config landed in the wrong place.
-
-Fix: `cd` to the project root that Claude Code has open, then re-run:
+**Step 1 — Check that `sema init` ran successfully**
 
 ```bash
-cd your-project   # the directory Claude Code is opened on
+claude mcp list
+```
+
+You should see `sema` in the output. If not, re-run:
+
+```bash
+cd your-project
 sema init
 ```
 
-**Check 2 — Did you reload VS Code?**
+`sema init` calls `claude mcp add sema -s user` internally. If the `claude` binary is not found, it will print the exact command to run manually:
 
-After `sema init` writes the config, Claude Code needs a reload to pick it up:
+```bash
+claude mcp add sema -s user -- /path/to/.venv/bin/sema serve --project /path/to/project
+```
+
+**Step 2 — Reload VS Code**
+
+After registering, Claude Code needs a reload:
 
 `Cmd+Shift+P` → `Developer: Reload Window`
 
-Then open a new chat and type `/mcp`. You should see `sema ✓ connected`.
+Then type `/mcp` in Claude Code chat. You should see `sema ✓ connected`.
 
-**Check 3 — Inspect the config that was written**
-
-```bash
-cat your-project/.claude/settings.json
-```
-
-It should look like this:
-
-```json
-{
-  "mcpServers": {
-    "sema": {
-      "command": "/absolute/path/to/.venv/bin/sema",
-      "args": ["serve", "--project", "/absolute/path/to/your-project"]
-    }
-  }
-}
-```
-
-Two things to verify:
-- `command` — the path must point to an existing file. If it doesn't (`ls` it to confirm), re-run `sema init` with the venv activated so the correct binary path is detected.
-- `args[1]` (`--project`) — must be the absolute path to the project root Claude Code has open.
-
-**Check 4 — Verify the binary path manually**
+**Step 3 — Verify the MCP server starts**
 
 ```bash
-# Does the binary exist?
-ls $(cat your-project/.claude/settings.json | python3 -c "import sys,json; print(json.load(sys.stdin)['mcpServers']['sema']['command'])")
-
-# Can it start the server?
 /path/to/.venv/bin/sema serve --project /path/to/your-project
 ```
 
-If the `serve` command errors, that's the root cause — fix it, then `sema init` again.
+This should block silently (no output). If it crashes with an error, that's the root cause — fix it, then re-run `sema init`.
+
+> **Note:** Seeing `Invalid JSON: EOF while parsing` when running `serve` manually is normal. The MCP server communicates over stdin/stdout — it expects JSON-RPC messages from Claude Code, not interactive terminal input.
+
+---
+
+### sema registered but still not showing in `/mcp`
+
+This usually means Claude Code is reading config from a different location than where `sema init` wrote. We discovered this the hard way.
+
+**The issue:** Different Claude Code interfaces read MCP config differently:
+
+| Interface | Where it reads MCP config |
+|---|---|
+| Claude Code CLI (`claude`) | `~/.claude.json` → `projects[path].mcpServers` |
+| VS Code extension | `claude mcp add -s user` (user-scoped) |
+| VS Code workspace | Same — user-scoped, NOT from `.code-workspace` `"mcp"` section |
+
+`sema init` now uses `claude mcp add -s user` which writes to the correct location for all interfaces. If you registered sema with an older version of sema (which wrote to `.claude/settings.json`), remove the old config and re-register:
+
+```bash
+# Remove old project-level config if present
+cat your-project/.claude/settings.json   # check if sema is in here
+
+# Re-register correctly
+cd your-project
+sema init
+```
+
+---
+
+### VS Code workspace: sema not showing after `sema init`
+
+**The cause:** When VS Code opens a `.code-workspace` file, the Claude Code extension does NOT read the `"mcp"` section inside the workspace file. It also does NOT read `.claude/settings.json` from the workspace parent directory.
+
+**The fix:** `sema init` registers sema at the user level (`-s user`) which works for all workspaces. Make sure you ran it:
+
+```bash
+claude mcp list   # should show sema
+```
+
+If sema is listed there but still not showing in `/mcp` inside VS Code, reload the window:
+
+`Cmd+Shift+P` → `Developer: Reload Window`
+
+---
+
+### Claude is connected to sema but never calls the tools
+
+Two causes:
+
+**1. Tools not yet approved**
+
+The first time Claude tries to call a sema tool, VS Code asks for permission. If you dismissed that prompt, the tools are blocked.
+
+Fix: In Claude Code chat, explicitly ask Claude to use sema:
+
+```
+use search_code to find authentication logic
+```
+
+When prompted "Allow sema to run search_code?", click **Allow Always**.
+
+**2. No CLAUDE.md in the project**
+
+Without a CLAUDE.md, Claude defaults to its own navigation strategy (Bash, Read). The CLAUDE.md is what tells Claude to call `search_code()` first.
+
+Check if the file exists at the git root of the project you're working in:
+
+```bash
+cat your-project/CLAUDE.md
+```
+
+If it's missing or doesn't mention sema, add it. See [Add CLAUDE.md to your project](#add-claudemd-to-your-project) for the template.
+
+> **Workspace note:** CLAUDE.md must be in each project's git root folder. A CLAUDE.md at the workspace parent directory is not read by Claude Code.
+
+---
+
+### `sema init --uninstall` did not remove sema
+
+`sema init --uninstall` calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. If sema still appears after uninstalling:
+
+```bash
+# Verify it was removed
+claude mcp list   # sema should not appear
+
+# Kill any lingering processes manually
+pkill -f "sema serve"
+
+# Reload VS Code
+# Cmd+Shift+P → Developer: Reload Window
+```
+
+---
+
+### Index is stale — search results look wrong
+
+The index reflects the state of your files at the time `sema index .` was last run. If you've made significant changes since then:
+
+```bash
+# Full re-index
+sema index . --reset
+
+# Or run the watcher so the index stays live
+sema watch .
+```
 
 ---
 
@@ -423,14 +574,12 @@ This deletes the vector database and metadata. Run `sema index .` to rebuild.
 
 ### Deactivate sema for a project (keep index)
 
-Remove sema from the project's Claude Code config:
-
 ```bash
 cd your-project
 sema init --uninstall
 ```
 
-To re-activate, run `sema init` again.
+This calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. To re-activate, run `sema init` again.
 
 ### Update sema to the latest version
 
@@ -476,19 +625,18 @@ rm -rf /your-project/.sema/
 ## CLI reference
 
 ```
-sema index .                     Index the current directory
-sema index . --reset             Delete existing index and re-index from scratch
-sema index ./path                Index a specific path
-sema watch                       Watch for file changes and re-index automatically
-sema watch ./path                Watch a specific directory
-sema init                        Register sema as MCP server (writes .claude/settings.json)
-sema init --uninstall            Remove sema from Claude Code config
-sema init --dry-run              Show what init would do without making changes
-sema search "query"              Run a hybrid semantic+BM25 search (test without Claude)
-sema search "query" --top-k 10  Return more results
-sema search "query" --all-types  Include docs/config sections in results
-sema status                      Show index stats (chunks, files, model, last updated)
-sema serve --project .           Start MCP server (called automatically by Claude Code)
+sema index .                                  Index the current directory
+sema index . --reset                          Delete existing index and re-index from scratch
+sema index . --workspace my.code-workspace    Index only the folders listed in a VS Code workspace file
+sema watch .                                  Watch for file changes and re-index automatically
+sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
+sema init                                     Register sema as MCP server (via claude mcp add -s user)
+sema init --uninstall                         Remove sema from Claude Code and kill running processes
+sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
+sema search "query" --top-k 10               Return more results
+sema search "query" --all-types               Include docs/config sections in results
+sema status                                   Show index stats (chunks, files, model, last updated)
+sema serve --project .                        Start MCP server (called automatically by Claude Code)
 ```
 
 ---

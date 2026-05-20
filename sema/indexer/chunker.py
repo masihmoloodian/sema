@@ -18,10 +18,15 @@ def index_project(
     store: SemaStore,
     embedder: Embedder,
     reset: bool = False,
+    base_root: Path | None = None,
 ) -> dict:
     """
     Main indexing entry point.
     Returns stats dict: {files, chunks, languages}.
+
+    base_root: root used for relative paths stored in the index. Defaults to
+    project_root. Set to the workspace root when indexing multiple projects so
+    paths include the project folder name (e.g. "backend/src/auth.ts").
 
     Pipeline:
       1. Walk all files (fast)
@@ -31,6 +36,9 @@ def index_project(
     """
     if reset:
         store.reset()
+
+    if base_root is None:
+        base_root = project_root
 
     all_files = list(walk_project(project_root))
     stats: dict = {"files": 0, "chunks": 0, "languages": {}}
@@ -48,7 +56,7 @@ def index_project(
 
         with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as executor:
             futures = {
-                executor.submit(parse_file, fp, project_root): fp
+                executor.submit(parse_file, fp, base_root): fp
                 for fp in all_files
             }
             for future in as_completed(futures):
@@ -78,11 +86,14 @@ def index_file(
     project_root: Path,
     store: SemaStore,
     embedder: Embedder,
+    base_root: Path | None = None,
 ) -> int:
     """Re-index a single file incrementally. Returns number of new chunks stored."""
-    rel = str(file_path.relative_to(project_root))
+    if base_root is None:
+        base_root = project_root
+    rel = str(file_path.relative_to(base_root))
     store.delete_by_file(rel)
-    chunks = parse_file(file_path, project_root)
+    chunks = parse_file(file_path, base_root)
     if chunks:
         _flush(chunks, store, embedder)
     return len(chunks)

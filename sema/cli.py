@@ -22,31 +22,63 @@ def main():
 
 @main.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--workspace", type=click.Path(exists=True), help="VS Code .code-workspace file — index only its listed folders")
 @click.option("--reset", is_flag=True, help="Delete existing index and re-index")
 @click.option("--verbose", is_flag=True, help="Show each file indexed")
-def index(path: str, reset: bool, verbose: bool):
-    """Index a codebase directory."""
+def index(path: str, workspace: str | None, reset: bool, verbose: bool):
+    """Index a codebase directory (or a VS Code workspace)."""
     from .indexer.chunker import index_project
     from .indexer.embedder import Embedder
     from .store.chroma import SemaStore
 
-    project_root = Path(path).resolve()
-    index_path = project_root / DEFAULT_INDEX_DIR
+    import datetime
+    import importlib.metadata
 
-    console.print(f"[bold]Indexing[/bold] {project_root}")
+    # Resolve workspace root and folders to index
+    if workspace:
+        workspace_file = Path(workspace).resolve()
+        workspace_root = workspace_file.parent
+        ws_data = json.loads(workspace_file.read_text())
+        folders = [
+            workspace_root / f["path"]
+            for f in ws_data.get("folders", [])
+        ]
+        missing = [f for f in folders if not f.exists()]
+        if missing:
+            for m in missing:
+                console.print(f"[yellow]⚠[/yellow]  Skipping missing folder: {m}")
+            folders = [f for f in folders if f.exists()]
+        if not folders:
+            console.print("[red]✗[/red] No valid folders found in workspace file.")
+            return
+        index_root = workspace_root
+        console.print(f"[bold]Workspace[/bold] {workspace_file.name}  ({len(folders)} folders)")
+    else:
+        index_root = Path(path).resolve()
+        folders = [index_root]
+        console.print(f"[bold]Indexing[/bold] {index_root}")
 
+    index_path = index_root / DEFAULT_INDEX_DIR
     store = SemaStore(index_path)
     embedder = Embedder()
 
-    stats = index_project(project_root, store, embedder, reset=reset)
+    total = {"files": 0, "chunks": 0, "languages": {}}
+    base_root = index_root if workspace else None
+    for folder in folders:
+        if workspace:
+            console.print(f"  [dim]→[/dim] {folder.name}")
+        stats = index_project(folder, store, embedder, reset=reset, base_root=base_root)
+        total["files"] += stats["files"]
+        total["chunks"] += stats["chunks"]
+        for lang, count in stats["languages"].items():
+            total["languages"][lang] = total["languages"].get(lang, 0) + count
+        reset = False  # only wipe on first folder to avoid clearing previous results
 
-    console.print(f"\n[green]✔[/green] Indexed [bold]{stats['files']}[/bold] files")
-    console.print(f"[green]✔[/green] Generated [bold]{stats['chunks']}[/bold] chunks")
-    for lang, count in stats["languages"].items():
+    console.print(f"\n[green]✔[/green] Indexed [bold]{total['files']}[/bold] files")
+    console.print(f"[green]✔[/green] Generated [bold]{total['chunks']}[/bold] chunks")
+    for lang, count in total["languages"].items():
         console.print(f"    {lang}: {count}")
 
-    import datetime
-    import importlib.metadata
     try:
         sema_version = importlib.metadata.version("sema")
     except importlib.metadata.PackageNotFoundError:
@@ -56,11 +88,11 @@ def index(path: str, reset: bool, verbose: bool):
         "version": "1",
         "model": "all-MiniLM-L6-v2",
         "indexed_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "chunk_count": stats["chunks"],
-        "file_count": stats["files"],
+        "chunk_count": total["chunks"],
+        "file_count": total["files"],
         "sema_version": sema_version,
     }
-    meta_path = project_root / DEFAULT_META_FILE
+    meta_path = index_root / DEFAULT_META_FILE
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path.write_text(json.dumps(meta, indent=2))
 
@@ -68,79 +100,92 @@ def index(path: str, reset: bool, verbose: bool):
     console.print("\nRun [bold]sema init[/bold] to register with Claude Code.")
 
 
-def _write_mcp_config(project_root: Path, index_path: Path) -> None:
-    """Write .claude/settings.json to register sema as an MCP server."""
-    import sys
+def _find_claude_bin() -> str | None:
+    """Find the claude CLI binary, checking PATH and known install locations."""
+    if found := shutil.which("claude"):
+        return found
+    candidates = [
+        Path.home() / ".local" / "bin" / "claude",
+        Path("/usr/local/bin/claude"),
+        Path("/opt/homebrew/bin/claude"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
+
+
+def _claude_mcp_add(project_root: Path, scope: str = "user") -> bool:
+    """Register sema via `claude mcp add`. Returns True on success."""
+    import subprocess, sys
     sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
-    settings_dir = project_root / ".claude"
-    settings_dir.mkdir(exist_ok=True)
-    settings_file = settings_dir / "settings.json"
-    existing = json.loads(settings_file.read_text()) if settings_file.exists() else {}
-    existing.setdefault("mcpServers", {})["sema"] = {
-        "command": sema_bin,
-        "args": ["serve", "--project", str(project_root)],
-    }
-    settings_file.write_text(json.dumps(existing, indent=2))
-    console.print(f"[green]✔[/green] Wrote MCP config to {settings_file}")
+    claude_bin = _find_claude_bin()
+    if not claude_bin:
+        return False
+    result = subprocess.run(
+        [claude_bin, "mcp", "add", "sema", "-s", scope,
+         "--", sema_bin, "serve", "--project", str(project_root)],
+        capture_output=True, text=True,
+    )
+    # Exit 1 with "already exists" is fine — server is registered
+    if result.returncode != 0 and "already exists" not in result.stderr + result.stdout:
+        return False
+    return True
+
+
+def _claude_mcp_remove(scope: str = "user") -> bool:
+    """Remove sema via `claude mcp remove`. Returns True on success."""
+    import subprocess
+    claude_bin = _find_claude_bin()
+    if not claude_bin:
+        return False
+    result = subprocess.run(
+        [claude_bin, "mcp", "remove", "sema", "-s", scope],
+        capture_output=True, text=True,
+    )
+    return result.returncode == 0
 
 
 @main.command()
-@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code config")
-@click.option("--dry-run", is_flag=True, help="Show what would be done without making changes")
-def init(uninstall: bool, dry_run: bool):
+@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code")
+def init(uninstall: bool):
     """Register sema as an MCP server with Claude Code."""
+    import subprocess
     project_root = Path(".").resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
 
     if uninstall:
-        candidates = [
-            project_root / ".claude" / "settings.json",
-            Path.home() / ".claude" / "settings.json",
-        ]
-        removed_any = False
-        for settings_file in candidates:
-            if not settings_file.exists():
-                continue
-            existing = json.loads(settings_file.read_text())
-            if "sema" not in existing.get("mcpServers", {}):
-                continue
-            if dry_run:
-                console.print(f"[dim]Would remove mcpServers.sema from {settings_file}[/dim]")
-                removed_any = True
-                continue
-            del existing["mcpServers"]["sema"]
-            if not existing["mcpServers"]:
-                del existing["mcpServers"]
-            settings_file.write_text(json.dumps(existing, indent=2))
-            console.print(f"[yellow]✔[/yellow] Removed sema from {settings_file}")
-            removed_any = True
-        if not removed_any:
-            console.print("[dim]sema is not registered in any Claude Code config.[/dim]")
+        ok = _claude_mcp_remove(scope="user")
+        if ok:
+            console.print("[yellow]✔[/yellow] Removed sema MCP server")
         else:
-            console.print("Reload VS Code to apply the change.")
+            console.print("[red]✗[/red] Could not remove via 'claude mcp remove'. Is the claude CLI installed?")
+
+        # Kill any running sema serve processes for this project
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", f"sema serve --project {project_root}"],
+                capture_output=True, text=True,
+            )
+            pids = result.stdout.split()
+            if pids:
+                subprocess.run(["kill"] + pids, check=False)
+                console.print(f"[yellow]✔[/yellow] Stopped {len(pids)} sema serve process(es)")
+        except FileNotFoundError:
+            pass
         return
 
     if not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
-    console.print("Registering with Claude Code...")
-
-    if not dry_run:
-        _write_mcp_config(project_root, index_path)
-
-    console.print("[green]✔[/green] Registered as MCP server 'sema'")
-
-    gitignore = Path(".gitignore")
-    entry = "\n# sema\n.sema/index/\n"
-    if not dry_run and gitignore.exists():
-        content = gitignore.read_text()
-        if ".sema/index/" not in content:
-            if click.confirm("Add .sema/index/ to .gitignore?", default=True):
-                gitignore.write_text(content + entry)
-                console.print("[green]✔[/green] Updated .gitignore")
-
-    console.print("\n[bold]Done.[/bold] Restart VS Code or run /mcp in Claude chat to confirm.")
+    ok = _claude_mcp_add(project_root, scope="user")
+    if ok:
+        console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope)")
+        console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Claude Code to confirm.")
+    else:
+        console.print("[red]✗[/red] Could not register via 'claude mcp add'. Is the claude CLI installed?")
+        console.print(f"\nRun manually:\n  claude mcp add sema -s user -- sema serve --project {project_root}")
 
 
 @main.command()
@@ -225,7 +270,8 @@ def status():
 
 @main.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
-def watch(path: str):
+@click.option("--workspace", type=click.Path(exists=True), help="VS Code .code-workspace file")
+def watch(path: str, workspace: str | None):
     """Watch for file changes and re-index automatically.
 
     Re-indexes only the changed file on each save — not the whole project.
@@ -233,26 +279,42 @@ def watch(path: str):
     (run sema index . first).
     """
     import datetime
-    from .indexer.chunker import index_file
     from .indexer.embedder import Embedder
     from .store.chroma import SemaStore
     from .utils.watcher import start_watch
 
-    project_root = Path(path).resolve()
-    index_path = project_root / DEFAULT_INDEX_DIR
+    if workspace:
+        workspace_file = Path(workspace).resolve()
+        watch_root = workspace_file.parent
+        ws_data = json.loads(workspace_file.read_text())
+        watch_dirs = [
+            watch_root / f["path"]
+            for f in ws_data.get("folders", [])
+            if (watch_root / f["path"]).exists()
+        ]
+        base_root = watch_root
+        console.print(f"[bold]Watching workspace[/bold] {workspace_file.name}  ({len(watch_dirs)} folders)")
+    else:
+        watch_root = Path(path).resolve()
+        watch_dirs = [watch_root]
+        base_root = watch_root
+        console.print(f"[bold]Watching[/bold] {watch_root}")
 
+    index_path = watch_root / DEFAULT_INDEX_DIR
     if not index_path.exists():
-        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        console.print("[red]✗[/red] No index found. Run [bold]sema index[/bold] first.")
         return
 
     store = SemaStore(index_path)
     embedder = Embedder()
 
-    console.print(f"[bold]Watching[/bold] {project_root}")
     console.print("[dim]Re-indexing changed files automatically. Press Ctrl+C to stop.[/dim]\n")
 
     def on_indexed(file_path: Path, n_chunks: int) -> None:
-        rel = file_path.relative_to(project_root)
+        try:
+            rel = file_path.relative_to(base_root)
+        except ValueError:
+            rel = file_path
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         if n_chunks == -1:
             console.print(f"[dim]{ts}[/dim]  [yellow]removed[/yellow]  {rel}")
@@ -261,7 +323,7 @@ def watch(path: str):
         else:
             console.print(f"[dim]{ts}[/dim]  [green]indexed[/green]   {rel}  [dim]({n_chunks} chunks)[/dim]")
 
-    start_watch(project_root, store, embedder, on_indexed=on_indexed)
+    start_watch(watch_dirs, store, embedder, on_indexed=on_indexed, base_root=base_root)
 
 
 @main.command()

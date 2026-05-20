@@ -25,12 +25,14 @@ _DEBOUNCE_SECONDS = 0.3
 class _Handler(FileSystemEventHandler):
     def __init__(
         self,
-        project_root: Path,
+        watch_root: Path,
         store: SemaStore,
         embedder: Embedder,
         on_indexed,   # callback(path, n_chunks) — used by CLI to print status
+        base_root: Path | None = None,
     ):
-        self._root = project_root.resolve()
+        self._root = watch_root.resolve()
+        self._base = (base_root or watch_root).resolve()
         self._store = store
         self._embedder = embedder
         self._on_indexed = on_indexed
@@ -92,7 +94,7 @@ class _Handler(FileSystemEventHandler):
             pass
 
         if deleted:
-            rel = str(p.relative_to(self._root))
+            rel = str(p.relative_to(self._base))
             self._store.delete_by_file(rel)
             self._on_indexed(p, -1)  # -1 signals deletion
             return
@@ -104,7 +106,7 @@ class _Handler(FileSystemEventHandler):
             return
 
         try:
-            n = index_file(p, self._root, self._store, self._embedder)
+            n = index_file(p, self._root, self._store, self._embedder, base_root=self._base)
             self._on_indexed(p, n)
         except Exception as e:
             self._on_indexed(p, 0)  # signal skipped so callers stay informed
@@ -112,23 +114,30 @@ class _Handler(FileSystemEventHandler):
 
 
 def start_watch(
-    project_root: Path,
+    watch_dirs: "Path | list[Path]",
     store: SemaStore,
     embedder: Embedder,
     on_indexed=None,
+    base_root: Path | None = None,
 ) -> None:
     """
     Block until Ctrl+C, re-indexing any file that changes.
 
+    watch_dirs: single path or list of paths to watch (workspace = list of folders).
+    base_root: root for relative paths in the index; defaults to first watch dir.
     on_indexed(path, n_chunks) is called after each file is processed.
     n_chunks == -1 means the file was deleted.
     """
     if on_indexed is None:
         on_indexed = lambda path, n: None  # noqa: E731
 
-    handler = _Handler(project_root, store, embedder, on_indexed)
+    if isinstance(watch_dirs, Path):
+        watch_dirs = [watch_dirs]
+
     observer = Observer()
-    observer.schedule(handler, str(project_root), recursive=True)
+    for watch_dir in watch_dirs:
+        handler = _Handler(watch_dir, store, embedder, on_indexed, base_root=base_root)
+        observer.schedule(handler, str(watch_dir), recursive=True)
     observer.start()
 
     try:
