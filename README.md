@@ -15,7 +15,7 @@ Works with
 <a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
-<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
+<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
 
 Every Claude Code and Codex session starts cold. On a large project, your AI assistant burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
@@ -366,8 +366,6 @@ sema init --claude --uninstall
 
 ### Step-by-step setup
 
-sema works with both the [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) and the [Codex CLI](https://github.com/openai/codex). You do **not** need the CLI if you're using the extension.
-
 ```bash
 # 1. Go to your project and index it — downloads ~80MB model on first run
 cd /your/project
@@ -383,27 +381,6 @@ sema init --codex
 # If using Codex CLI instead:
 #    Restart Codex from your project directory: codex
 #    Then type /mcp to confirm sema shows as Enabled
-```
-
-### What gets written
-
-`sema init --codex` creates `.codex/config.toml` inside your project:
-
-```toml
-[mcp_servers.sema]
-enabled = true
-command = "/absolute/path/to/sema"
-args = ["serve", "--project", "/absolute/path/to/your/project"]
-startup_timeout_sec = 15.0
-tool_timeout_sec = 60.0
-```
-
-> **Why project-level config?** Codex reads `.codex/config.toml` from the current project directory. Unlike VS Code, Codex does not support template variables like `{workspace_folder}` in MCP args — the project path must be hardcoded. Project-level config is the correct pattern: each project gets its own entry pointing to its own index.
-
-Because the config contains an absolute path specific to your machine, add it to `.gitignore`:
-
-```bash
-echo ".codex/" >> .gitignore
 ```
 
 ### Add `AGENTS.md` to your project
@@ -425,16 +402,6 @@ This project is indexed by sema. Use sema MCP tools to locate code — do not us
 
 Always call `search_code()` before using grep or reading files directly.
 ```
-
-### Verify it's working
-
-Inside a Codex session, ask:
-
-```
-Use search_code to find how authentication works in this codebase
-```
-
-Codex should call `search_code(...)` directly and return matching function signatures — not fall back to ripgrep or file reading.
 
 ### Uninstall
 
