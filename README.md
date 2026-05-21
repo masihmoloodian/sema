@@ -11,10 +11,10 @@
 Sema is a semantic code indexer and MCP server for Claude Code. It indexes your entire codebase locally — every function, class, and method — and gives Claude a search API so it never has to read files blindly again. 
 
 Works with
-<a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI** </a>,
-<a href="https://code.claude.com/docs/en/vs-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Claude" height="16" style="vertical-align:middle;" /> Claude Code VS Code extension</a>,
+<a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
+<a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
 and
-<a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>.
+<a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="OpenAI" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>.
 
 Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
@@ -29,7 +29,7 @@ Index once. Claude searches forever.
 - [Before and after](#before-and-after)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Quick start](#quick-start)
+- [Claude Code setup](#claude-code-setup)
 - [OpenAI Codex setup](#openai-codex-setup)
 - [VS Code workspace setup](#vs-code-workspace-setup)
 - [Troubleshooting](#troubleshooting)
@@ -250,7 +250,9 @@ The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "wi
 ## Requirements
 
 - Python 3.11 or higher
-- Claude Code — [CLI](https://docs.anthropic.com/en/docs/claude-code) or [VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+- One of:
+  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+  - [OpenAI Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`)
 - ~80MB disk space for the embedding model (downloaded once, cached globally)
 - No Docker, no external APIs, no GPU — runs entirely on your machine
 
@@ -298,127 +300,158 @@ uv pip install -e ".[dev]"
 
 ---
 
-## Quick start
+## Claude Code setup
+
+### Step-by-step
 
 ```bash
-# 1. Go to your project
+# 1. Go to your project and index it — downloads ~80MB model on first run
 cd your-project
+sema index .
 
-# 2. Index it — downloads the ~80MB model on first run
-/path/to/sema/venv/bin/sema index .
+# 2. Register sema with Claude Code
+sema init
 
-# 3. Register sema as an MCP server with Claude Code
-#    (runs `claude mcp add sema -s user` internally)
-/path/to/sema/venv/bin/sema init
+# 3. Reload VS Code (if using the VS Code extension)
+#    Cmd+Shift+P → "Developer: Reload Window"
 
-# 4. Reload VS Code
-#    Press Cmd+Shift+P → "Developer: Reload Window"
-
-# 5. Verify the connection
-#    Open a new chat in Claude Code and type /mcp
+# 4. Verify the connection — type /mcp in Claude Code chat
 #    You should see:  sema  ✓ connected
-
-# 6. (Optional) Keep the index up to date automatically
-#    Run this in a separate terminal while you work:
-/path/to/sema/venv/bin/sema watch .
-#    Ctrl+C to stop
-
-# 7. Add a CLAUDE.md to your project (see Configuration section)
-#    This tells Claude to use sema tools first
 ```
 
-### Add CLAUDE.md to your project
+### Add `CLAUDE.md` to your project
 
-Create a `CLAUDE.md` file in your project root. Without this, Claude may still fall back to reading files directly:
+Without this, Claude may still fall back to reading files directly. Create a `CLAUDE.md` at your project root:
 
 ```markdown
 ## Codebase navigation
 
 This project is indexed by sema. Use sema tools to locate code before reading files.
 
-### Which tool to use
-
 | Goal | Tool |
 |---|---|
 | Find a function, class, or method | `search_code("natural language description")` |
 | Read the full body of a known symbol | `get_code("exactSymbolName")` |
-| Find where a symbol is called or referenced | `find_usages("symbolName")` |
-| Understand what a file exports | `explain_file("path/to/file.ts")` |
+| Find all callers of a symbol | `find_usages("symbolName")` |
 | Understand the overall architecture | `repo_map()` |
 | See what a function calls and what calls it | `impact_analysis("symbolName")` |
 
-### Rules
-
-1. **Always call `search_code()` before using Bash find/grep or Read to explore.**
+**Rules:**
+1. Always call `search_code()` before using Bash find/grep or Read to explore.
 2. If `search_code()` returns relevant results, use `get_code()` for the full body — do not Read the whole file.
 3. Before changing a function, call `impact_analysis()` to understand the blast radius.
-4. If sema returns no results or the results look wrong, fall back to normal file navigation — the index may be stale or the symbol may not exist.
-5. Only call `repo_map()` when you genuinely need an architecture overview — it costs ~400–800 tokens.
+4. If sema returns no results, fall back to normal file navigation — the index may be stale.
+```
+
+### Keep the index fresh (optional)
+
+Run this in a background terminal while you work:
+
+```bash
+sema watch .
+```
+
+Detects file saves and re-indexes only changed files incrementally.
+
+### Uninstall
+
+```bash
+sema init --uninstall
 ```
 
 ---
 
 ## OpenAI Codex setup
 
-sema works with [OpenAI Codex CLI](https://github.com/openai/codex) via MCP. Codex has no built-in semantic code search — sema fills that gap today.
+sema works with [OpenAI Codex CLI](https://github.com/openai/codex) via MCP. Codex has no built-in semantic code search — the community has open feature requests for it ([#5181](https://github.com/openai/codex/issues/5181), [#3504](https://github.com/openai/codex/issues/3504), [#609](https://github.com/openai/codex/issues/609)) but none are implemented. sema fills that gap today, offline, with call graphs on top.
 
-### One-command setup
+### Step-by-step setup
 
 ```bash
-# 1. Index your project
+# 1. Install Codex CLI (if not already installed)
+npm install -g @openai/codex
+
+# 2. Go to your project and index it
+cd /your/project
 sema index .
 
-# 2. Register with Codex (writes ~/.codex/config.toml)
+# 3. Register sema with Codex
 sema init --codex
 
-# 3. Restart Codex — sema tools are now available
+# 4. Restart Codex from your project directory
+cd /your/project
+codex
 ```
+
+That's it. Type `/mcp` inside Codex to confirm sema shows as **Enabled**.
 
 ### What gets written
 
-`sema init --codex` appends this block to `~/.codex/config.toml`:
+`sema init --codex` creates `.codex/config.toml` inside your project:
 
 ```toml
 [mcp_servers.sema]
 enabled = true
-command = "/path/to/sema"
-args = ["serve", "--project", "{workspace_folder}"]
+command = "/absolute/path/to/sema"
+args = ["serve", "--project", "/absolute/path/to/your/project"]
 startup_timeout_sec = 15.0
 tool_timeout_sec = 60.0
 ```
 
-### Add instructions to your project
+> **Why project-level config?** Codex reads `.codex/config.toml` from the current project directory. Unlike VS Code, Codex does not support template variables like `{workspace_folder}` in MCP args — the project path must be hardcoded. Project-level config is the correct pattern: each project gets its own entry pointing to its own index.
 
-Create a `AGENTS.md` in your project root (Codex's equivalent of `CLAUDE.md`):
+Because the config contains an absolute path specific to your machine, add it to `.gitignore`:
+
+```bash
+echo ".codex/" >> .gitignore
+```
+
+### Add `AGENTS.md` to your project
+
+Codex reads `AGENTS.md` the way Claude Code reads `CLAUDE.md`. Without it, Codex may not call sema tools automatically. Create one at your project root:
 
 ```markdown
 ## Codebase navigation
 
-This project is indexed by sema. Use sema MCP tools to locate code before reading files.
+This project is indexed by sema. Use sema MCP tools to locate code — do not use grep or read files directly.
 
 | Goal | Tool |
 |---|---|
 | Find a function, class, or method | `search_code("natural language description")` |
 | Read full source of a known symbol | `get_code("symbolName")` |
-| Find where a symbol is used | `find_usages("symbolName")` |
+| Find all callers of a symbol | `find_usages("symbolName")` |
 | Understand call chains and blast radius | `impact_analysis("symbolName")` |
-| List all symbols in a file | `list_symbols("path/to/file")` |
+| Architecture overview | `repo_map()` |
 
 Always call `search_code()` before using grep or reading files directly.
 ```
 
-### To uninstall
+### Verify it's working
+
+Inside a Codex session, ask:
+
+```
+Use search_code to find how authentication works in this codebase
+```
+
+Codex should call `search_code(...)` directly and return matching function signatures — not fall back to ripgrep or file reading.
+
+### Uninstall
 
 ```bash
 sema init --codex --uninstall
 ```
 
-### Why sema instead of waiting for Codex native search
+This removes the `[mcp_servers.sema]` block from `.codex/config.toml`.
 
-The Codex community has open feature requests for built-in semantic indexing ([#5181](https://github.com/openai/codex/issues/5181), [#3504](https://github.com/openai/codex/issues/3504), [#609](https://github.com/openai/codex/issues/609)) — none are implemented. sema provides this today with two additional advantages over any planned native solution:
+### Why sema over waiting for Codex native search
 
-- **Fully offline** — uses local SBERT embeddings, no OpenAI API calls per search query
-- **Call graphs** — `find_usages` and `impact_analysis` have no equivalent in any planned Codex feature
+| | sema (today) | Codex native (proposed) |
+|---|---|---|
+| Semantic code search | ✅ | ❌ not implemented |
+| Works offline | ✅ no API calls per query | ❌ would use OpenAI embeddings API |
+| Call graphs (`find_usages`, `impact_analysis`) | ✅ | ❌ not proposed |
+| Symbol-level granularity (function/class/method) | ✅ | unknown |
 
 ---
 
@@ -703,7 +736,7 @@ sema watch .                                  Watch for file changes and re-inde
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
 sema init                                     Register sema as MCP server with Claude Code (via claude mcp add -s user)
 sema init --uninstall                         Remove sema from Claude Code and kill running processes
-sema init --codex                             Register sema as MCP server with OpenAI Codex (~/.codex/config.toml)
+sema init --codex                             Register sema as MCP server with OpenAI Codex (.codex/config.toml in project)
 sema init --codex --uninstall                 Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10               Return more results
