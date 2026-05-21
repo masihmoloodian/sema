@@ -149,14 +149,68 @@ def _claude_mcp_remove(scope: str = "user") -> bool:
     return result.returncode == 0
 
 
+def _codex_config_add(project_root: Path) -> tuple[bool, Path]:
+    """Write [mcp_servers.sema] block into ~/.codex/config.toml. Returns (changed, config_path)."""
+    import sys
+    sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
+    config_path = Path.home() / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    block = (
+        "\n[mcp_servers.sema]\n"
+        "enabled = true\n"
+        f'command = "{sema_bin}"\n'
+        'args = ["serve", "--project", "{workspace_folder}"]\n'
+        "startup_timeout_sec = 15.0\n"
+        "tool_timeout_sec = 60.0\n"
+    )
+
+    existing = config_path.read_text() if config_path.exists() else ""
+    if "[mcp_servers.sema]" in existing:
+        return False, config_path  # already present
+
+    config_path.write_text(existing.rstrip() + block)
+    return True, config_path
+
+
+def _codex_config_remove(config_path: Path) -> bool:
+    """Remove the [mcp_servers.sema] block from config.toml. Returns True if removed."""
+    if not config_path.exists():
+        return False
+    lines = config_path.read_text().splitlines(keepends=True)
+    out, inside = [], False
+    for line in lines:
+        if line.strip() == "[mcp_servers.sema]":
+            inside = True
+            continue
+        if inside and line.startswith("["):
+            inside = False
+        if not inside:
+            out.append(line)
+    if len(out) == len(lines):
+        return False
+    config_path.write_text("".join(out))
+    return True
+
+
 @main.command()
-@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code")
-def init(uninstall: bool):
-    """Register sema as an MCP server with Claude Code."""
+@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code / Codex")
+@click.option("--codex", "target", flag_value="codex", help="Register with OpenAI Codex")
+@click.option("--claude", "target", flag_value="claude", default=True, help="Register with Claude Code (default)")
+def init(uninstall: bool, target: str):
+    """Register sema as an MCP server with Claude Code or OpenAI Codex."""
     import subprocess
     project_root = Path(".").resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
 
+    if target == "codex":
+        _init_codex(uninstall, project_root, index_path)
+    else:
+        _init_claude(uninstall, project_root, index_path)
+
+
+def _init_claude(uninstall: bool, project_root: Path, index_path: Path) -> None:
+    import subprocess
     if uninstall:
         ok = _claude_mcp_remove(scope="user")
         if ok:
@@ -164,7 +218,6 @@ def init(uninstall: bool):
         else:
             console.print("[red]✗[/red] Could not remove via 'claude mcp remove'. Is the claude CLI installed?")
 
-        # Kill any running sema serve processes for this project
         try:
             result = subprocess.run(
                 ["pgrep", "-f", f"sema serve --project {project_root}"],
@@ -189,6 +242,28 @@ def init(uninstall: bool):
     else:
         console.print("[red]✗[/red] Could not register via 'claude mcp add'. Is the claude CLI installed?")
         console.print(f"\nRun manually:\n  claude mcp add sema -s user -- sema serve --project {project_root}")
+
+
+def _init_codex(uninstall: bool, project_root: Path, index_path: Path) -> None:
+    config_path = Path.home() / ".codex" / "config.toml"
+    if uninstall:
+        removed = _codex_config_remove(config_path)
+        if removed:
+            console.print(f"[yellow]✔[/yellow] Removed \\[mcp_servers.sema] from {config_path}")
+        else:
+            console.print(f"[yellow]–[/yellow] \\[mcp_servers.sema] not found in {config_path}")
+        return
+
+    if not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    changed, config_path = _codex_config_add(project_root)
+    if changed:
+        console.print(f"[green]✔[/green] Added \\[mcp_servers.sema] to {config_path}")
+    else:
+        console.print(f"[yellow]–[/yellow] \\[mcp_servers.sema] already present in {config_path}")
+    console.print("\n[bold]Done.[/bold] Restart Codex to load the MCP server.")
 
 
 @main.command()

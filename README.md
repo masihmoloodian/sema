@@ -11,9 +11,10 @@
 Sema is a semantic code indexer and MCP server for Claude Code. It indexes your entire codebase locally — every function, class, and method — and gives Claude a search API so it never has to read files blindly again. 
 
 Works with
-<a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI** </a>
+<a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI** </a>,
+<a href="https://code.claude.com/docs/en/vs-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Claude" height="16" style="vertical-align:middle;" /> Claude Code VS Code extension</a>,
 and
-<a href="https://code.claude.com/docs/en/vs-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Claude" height="16" style="vertical-align:middle;" /> Claude Code VS Code extension</a>.
+<a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>.
 
 Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
@@ -29,6 +30,7 @@ Index once. Claude searches forever.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [OpenAI Codex setup](#openai-codex-setup)
 - [VS Code workspace setup](#vs-code-workspace-setup)
 - [Troubleshooting](#troubleshooting)
 - [Managing sema](#managing-sema)
@@ -356,6 +358,70 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 
 ---
 
+## OpenAI Codex setup
+
+sema works with [OpenAI Codex CLI](https://github.com/openai/codex) via MCP. Codex has no built-in semantic code search — sema fills that gap today.
+
+### One-command setup
+
+```bash
+# 1. Index your project
+sema index .
+
+# 2. Register with Codex (writes ~/.codex/config.toml)
+sema init --codex
+
+# 3. Restart Codex — sema tools are now available
+```
+
+### What gets written
+
+`sema init --codex` appends this block to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.sema]
+enabled = true
+command = "/path/to/sema"
+args = ["serve", "--project", "{workspace_folder}"]
+startup_timeout_sec = 15.0
+tool_timeout_sec = 60.0
+```
+
+### Add instructions to your project
+
+Create a `AGENTS.md` in your project root (Codex's equivalent of `CLAUDE.md`):
+
+```markdown
+## Codebase navigation
+
+This project is indexed by sema. Use sema MCP tools to locate code before reading files.
+
+| Goal | Tool |
+|---|---|
+| Find a function, class, or method | `search_code("natural language description")` |
+| Read full source of a known symbol | `get_code("symbolName")` |
+| Find where a symbol is used | `find_usages("symbolName")` |
+| Understand call chains and blast radius | `impact_analysis("symbolName")` |
+| List all symbols in a file | `list_symbols("path/to/file")` |
+
+Always call `search_code()` before using grep or reading files directly.
+```
+
+### To uninstall
+
+```bash
+sema init --codex --uninstall
+```
+
+### Why sema instead of waiting for Codex native search
+
+The Codex community has open feature requests for built-in semantic indexing ([#5181](https://github.com/openai/codex/issues/5181), [#3504](https://github.com/openai/codex/issues/3504), [#609](https://github.com/openai/codex/issues/609)) — none are implemented. sema provides this today with two additional advantages over any planned native solution:
+
+- **Fully offline** — uses local SBERT embeddings, no OpenAI API calls per search query
+- **Call graphs** — `find_usages` and `impact_analysis` have no equivalent in any planned Codex feature
+
+---
+
 ## VS Code workspace setup
 
 A VS Code workspace (`.code-workspace` file) groups multiple project folders under one window. Sema supports this with two extra flags.
@@ -635,8 +701,10 @@ sema index . --reset                          Delete existing index and re-index
 sema index . --workspace my.code-workspace    Index only the folders listed in a VS Code workspace file
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
-sema init                                     Register sema as MCP server (via claude mcp add -s user)
+sema init                                     Register sema as MCP server with Claude Code (via claude mcp add -s user)
 sema init --uninstall                         Remove sema from Claude Code and kill running processes
+sema init --codex                             Register sema as MCP server with OpenAI Codex (~/.codex/config.toml)
+sema init --codex --uninstall                 Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10               Return more results
 sema search "query" --all-types               Include docs/config sections in results
