@@ -16,7 +16,7 @@ Works with
 and
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="OpenAI" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>.
 
-Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
+Every Claude Code and Codex session starts cold. On a large project, your AI assistant burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
 Index once. Claude searches forever.
 
@@ -54,9 +54,9 @@ Index once. Claude searches forever.
 
 ## Why sema
 
-Every Claude Code session starts cold. Claude has no memory of your codebase, so it explores — running shell commands, reading files one by one, building a mental model from scratch. This costs tokens, takes time, and happens again every single session.
+Every Claude Code and Codex session starts cold. Your AI assistant has no memory of your codebase, so it explores — running shell commands, reading files one by one, building a mental model from scratch. This costs tokens, takes time, and happens again every single session.
 
-The root problem: **Claude Code navigates by reading, not by searching.**
+The root problem: **AI coding assistants navigate by reading, not by searching.**
 
 sema gives Claude a search index. Instead of:
 ```
