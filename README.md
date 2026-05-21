@@ -11,11 +11,12 @@
 Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never has to read files blindly again.
 
 Works with
+
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
-<a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
-and
-<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
+
+<a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a> and
+<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"> **Codex VS Code**</a>.
 
 Every Claude Code and Codex session starts cold. On a large project, your AI assistant burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
@@ -59,7 +60,7 @@ Every Claude Code and Codex session starts cold. Your AI assistant has no memory
 
 The root problem: **AI coding assistants navigate by reading, not by searching.**
 
-sema gives Claude a search index. Instead of:
+sema gives Claude/Codex a search index. Instead of:
 ```
 find . -name "*.ts" | head -20
 cat apps/api/src/auth/auth.service.ts       # 200 lines
@@ -311,7 +312,7 @@ cd your-project
 sema index .
 
 # 2. Register sema with Claude Code
-sema init
+sema init --claude
 
 # 3. Reload VS Code (if using the VS Code extension)
 #    Cmd+Shift+P → "Developer: Reload Window"
@@ -357,7 +358,7 @@ Detects file saves and re-indexes only changed files incrementally.
 ### Uninstall
 
 ```bash
-sema init --uninstall
+sema init --claude --uninstall
 ```
 
 ---
@@ -724,8 +725,8 @@ sema index . --reset                          Delete existing index and re-index
 sema index . --workspace my.code-workspace    Index only the folders listed in a VS Code workspace file
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
-sema init                                     Register sema as MCP server with Claude Code (via claude mcp add -s user)
-sema init --uninstall                         Remove sema from Claude Code and kill running processes
+sema init --claude                            Register sema as MCP server with Claude Code (via claude mcp add -s user)
+sema init --claude --uninstall               Remove sema from Claude Code and kill running processes
 sema init --codex                             Register sema as MCP server with OpenAI Codex (.codex/config.toml in project)
 sema init --codex --uninstall                 Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
