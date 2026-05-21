@@ -727,7 +727,7 @@ sema search "query"                           Run a hybrid semantic+BM25 search 
 sema search "query" --top-k 10               Return more results
 sema search "query" --all-types               Include docs/config sections in results
 sema status                                   Show index stats (chunks, files, model, last updated)
-sema serve --project .                        Start MCP server (called automatically by Claude Code)
+sema serve --project .                        Start MCP server (called automatically by Claude Code or Codex)
 ```
 
 ---
