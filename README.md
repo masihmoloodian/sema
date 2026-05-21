@@ -13,8 +13,9 @@ Sema is a semantic code indexer and MCP server for Claude Code. It indexes your 
 Works with
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
 <a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
+<a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="OpenAI" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
-<a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg" alt="OpenAI" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>.
+<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Codex VS Code extension**</a>.
 
 Every Claude Code session starts cold. On a large project, Claude burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
@@ -251,8 +252,8 @@ The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "wi
 
 - Python 3.11 or higher
 - One of:
-  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
-  - [OpenAI Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`)
+  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [Claude Code VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+  - [OpenAI Codex CLI](https://github.com/openai/codex) or [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) (`openai.chatgpt`)
 - ~80MB disk space for the embedding model (downloaded once, cached globally)
 - No Docker, no external APIs, no GPU — runs entirely on your machine
 
@@ -363,27 +364,26 @@ sema init --uninstall
 
 ## OpenAI Codex setup
 
-sema works with [OpenAI Codex CLI](https://github.com/openai/codex) via MCP. Codex has no built-in semantic code search — the community has open feature requests for it ([#5181](https://github.com/openai/codex/issues/5181), [#3504](https://github.com/openai/codex/issues/3504), [#609](https://github.com/openai/codex/issues/609)) but none are implemented. sema fills that gap today, offline, with call graphs on top.
+sema works with both the [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) (`openai.chatgpt`) and the [Codex CLI](https://github.com/openai/codex). **The setup is identical for both** — they share the same `.codex/config.toml` config file.
+
+Codex has no built-in semantic code search — the community has open feature requests for it ([#5181](https://github.com/openai/codex/issues/5181), [#3504](https://github.com/openai/codex/issues/3504), [#609](https://github.com/openai/codex/issues/609)) but none are implemented. sema fills that gap today, offline, with call graphs on top.
 
 ### Step-by-step setup
 
 ```bash
-# 1. Install Codex CLI (if not already installed)
-npm install -g @openai/codex
-
-# 2. Go to your project and index it
+# 1. Go to your project and index it
 cd /your/project
 sema index .
 
-# 3. Register sema with Codex
+# 2. Register sema with Codex
 sema init --codex
 
-# 4. Restart Codex from your project directory
-cd /your/project
-codex
+# 3. Reload Codex
+#    VS Code extension: Cmd+Shift+P → "Developer: Reload Window"
+#    CLI: restart codex from your project directory
 ```
 
-That's it. Type `/mcp` inside Codex to confirm sema shows as **Enabled**.
+Type `/mcp` inside Codex to confirm sema shows as **Enabled**.
 
 ### What gets written
 
