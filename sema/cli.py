@@ -150,17 +150,21 @@ def _claude_mcp_remove(scope: str = "user") -> bool:
 
 
 def _codex_config_add(project_root: Path) -> tuple[bool, Path]:
-    """Write [mcp_servers.sema] block into ~/.codex/config.toml. Returns (changed, config_path)."""
+    """Write [mcp_servers.sema] into <project>/.codex/config.toml. Returns (changed, config_path).
+
+    Uses project-level config (not ~/.codex/config.toml) so the hardcoded project
+    path is correct — Codex does not support {workspace_folder} template substitution.
+    """
     import sys
     sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
-    config_path = Path.home() / ".codex" / "config.toml"
+    config_path = project_root / ".codex" / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     block = (
         "\n[mcp_servers.sema]\n"
         "enabled = true\n"
         f'command = "{sema_bin}"\n'
-        'args = ["serve", "--project", "{workspace_folder}"]\n'
+        f'args = ["serve", "--project", "{project_root}"]\n'
         "startup_timeout_sec = 15.0\n"
         "tool_timeout_sec = 60.0\n"
     )
@@ -245,7 +249,7 @@ def _init_claude(uninstall: bool, project_root: Path, index_path: Path) -> None:
 
 
 def _init_codex(uninstall: bool, project_root: Path, index_path: Path) -> None:
-    config_path = Path.home() / ".codex" / "config.toml"
+    config_path = project_root / ".codex" / "config.toml"
     if uninstall:
         removed = _codex_config_remove(config_path)
         if removed:
