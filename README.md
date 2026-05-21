@@ -263,41 +263,45 @@ The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "wi
 
 > sema is not yet published to PyPI. Install from source.
 
-### Install from source
+### Using uv (recommended)
 
 ```bash
-# 1. Clone the repository
+# 1. Clone to wherever you want
 git clone https://github.com/masihmoloodian/sema.git
 cd sema
 
-# 2. Create a virtual environment
-python3 -m venv .venv
-
-# 3. Activate it
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
-
-# 4. Install sema and all dependencies
-pip install -e ".[dev]"
-
-# 5. Verify installation
-sema --version
-```
-
-### Using uv (faster install)
-
-```bash
-git clone https://github.com/masihmoloodian/sema.git
-cd sema
-
+# 2. Create a virtual environment and install
 uv venv --python 3.12 .venv
 uv pip install -e ".[dev]"
 
-.venv/bin/sema --version
+# 3. Add sema to your PATH so you can call it from any project
+echo "export PATH=\"$(pwd)/.venv/bin:\$PATH\"" >> ~/.zshrc
+source ~/.zshrc
+
+# 4. Verify — run this from any directory
+sema --version
 ```
 
-> If `sema` is not on your PATH after installing, use the full path:
-> `.venv/bin/sema` (macOS/Linux) or `.venv\Scripts\sema` (Windows)
+> Step 3 writes the absolute path of your current directory into `~/.zshrc` automatically.
+> For bash: replace `~/.zshrc` with `~/.bashrc`.
+
+### Using pip
+
+```bash
+git clone https://github.com/masihmoloodian/sema.git
+cd sema
+
+python3 -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+
+pip install -e ".[dev]"
+
+echo "export PATH=\"$(pwd)/.venv/bin:\$PATH\"" >> ~/.zshrc
+source ~/.zshrc
+
+sema --version
+```
 
 ---
 
