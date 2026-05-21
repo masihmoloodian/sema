@@ -11,16 +11,15 @@
 Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never has to read files blindly again.
 
 Works with
-
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
+<a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
-
-<a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a> and
-<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"> **Codex VS Code**</a>.
+and
+<a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
 
 Every Claude Code and Codex session starts cold. On a large project, your AI assistant burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything. Sema fixes this at the root.
 
-Index once. Claude searches forever.
+Index once. Your AI searches forever.
 
 ---
 
@@ -98,7 +97,7 @@ sema index .
               MCP server (stdio)
                         │
                         ▼
-              Claude Code ◄──► search_code / get_code / repo_map / ...
+              Claude / Codex ◄──► search_code / get_code / repo_map / ...
 ```
 
 Every indexed unit is a **Chunk** — a function, class, method, or section of a config/doc file — with its full source stored alongside its embedding vector. `search_code()` returns signatures only. `get_code()` returns the full body on demand.
@@ -107,7 +106,7 @@ Every indexed unit is a **Chunk** — a function, class, method, or section of a
 
 ## Before and after
 
-These comparisons use real, publicly available open-source repositories. Each shows the actual tool calls Claude would make without sema versus the sema approach — with token costs derived from real file sizes.
+These comparisons use real, publicly available open-source repositories. Each shows the actual tool calls an AI assistant would make without sema versus the sema approach — with token costs derived from real file sizes.
 
 Token estimates: ~1 token per 4 characters of source code.
 
@@ -117,7 +116,7 @@ Token estimates: ~1 token per 4 characters of source code.
 
 **Question:** *"How does magic link authentication work end-to-end — which service methods and controller endpoints are involved?"*
 
-**Without sema** — Claude has no index, explores by reading files:
+**Without sema** — no index, explores by reading files:
 
 | Step | Tool call | Tokens |
 |---|---|---|
@@ -245,7 +244,7 @@ search_code("authentication middleware JWT token")
 
 Token counts are measured using `tiktoken` (cl100k_base) on the actual files from each repo, and on real `search_code` / `get_code` output. The "without" bash command costs are estimated at ~150–300 tokens each.
 
-The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "without" cost grows with repo size because Claude must read whole files to locate relevant code. On large TypeScript or Python projects the savings are consistently 8–9×.
+The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "without" cost grows with repo size because the AI must read whole files to locate relevant code. On large TypeScript or Python projects the savings are consistently 8–9×.
 
 ---
 
@@ -253,8 +252,8 @@ The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "wi
 
 - Python 3.11 or higher
 - One of:
-  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
-  - [OpenAI Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`)
+  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [Claude Code VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+  - [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) or [OpenAI Codex CLI](https://github.com/openai/codex)
 - ~80MB disk space for the embedding model (downloaded once, cached globally)
 - No Docker, no external APIs, no GPU — runs entirely on your machine
 
@@ -367,23 +366,24 @@ sema init --claude --uninstall
 
 ### Step-by-step setup
 
-```bash
-# 1. Install Codex CLI (if not already installed)
-npm install -g @openai/codex
+sema works with both the [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) and the [Codex CLI](https://github.com/openai/codex). You do **not** need the CLI if you're using the extension.
 
-# 2. Go to your project and index it
+```bash
+# 1. Go to your project and index it — downloads ~80MB model on first run
 cd /your/project
 sema index .
 
-# 3. Register sema with Codex
+# 2. Register sema with Codex
 sema init --codex
 
-# 4. Restart Codex from your project directory
-cd /your/project
-codex
-```
+# 3. Reload VS Code (if using the VS Code extension)
+#    Cmd+Shift+P → "Developer: Reload Window"
+#    Then open a Codex chat and type /mcp — you should see: sema  Enabled
 
-That's it. Type `/mcp` inside Codex to confirm sema shows as **Enabled**.
+# If using Codex CLI instead:
+#    Restart Codex from your project directory: codex
+#    Then type /mcp to confirm sema shows as Enabled
+```
 
 ### What gets written
 
@@ -466,7 +466,7 @@ Paths in the index include the project folder name (`backend/src/auth.ts`, not j
 **2. Register with Claude Code**
 
 ```bash
-sema init
+sema init --claude
 ```
 
 This runs `claude mcp add sema -s user` under the hood, which registers sema at the user level — visible in every project and workspace, not just one folder.
@@ -513,8 +513,9 @@ A file save in any project triggers incremental re-indexing automatically.
 
 ### sema not listed in `/mcp`
 
-**Step 1 — Check that `sema init` ran successfully**
+**Step 1 — Check that sema was registered successfully**
 
+For Claude Code:
 ```bash
 claude mcp list
 ```
@@ -523,22 +524,29 @@ You should see `sema` in the output. If not, re-run:
 
 ```bash
 cd your-project
-sema init
+sema init --claude
 ```
 
-`sema init` calls `claude mcp add sema -s user` internally. If the `claude` binary is not found, it will print the exact command to run manually:
+`sema init --claude` calls `claude mcp add sema -s user` internally. If the `claude` binary is not found, it will print the exact command to run manually:
 
 ```bash
 claude mcp add sema -s user -- /path/to/.venv/bin/sema serve --project /path/to/project
 ```
 
+For Codex, check `.codex/config.toml` in your project:
+```bash
+cat .codex/config.toml
+```
+
+If it's missing, re-run `sema init --codex` from your project directory.
+
 **Step 2 — Reload VS Code**
 
-After registering, Claude Code needs a reload:
+After registering, the AI extension needs a reload:
 
 `Cmd+Shift+P` → `Developer: Reload Window`
 
-Then type `/mcp` in Claude Code chat. You should see `sema ✓ connected`.
+Then type `/mcp` in chat. You should see `sema` listed as connected/enabled.
 
 **Step 3 — Verify the MCP server starts**
 
@@ -564,7 +572,7 @@ This usually means Claude Code is reading config from a different location than 
 | VS Code extension | `claude mcp add -s user` (user-scoped) |
 | VS Code workspace | Same — user-scoped, NOT from `.code-workspace` `"mcp"` section |
 
-`sema init` now uses `claude mcp add -s user` which writes to the correct location for all interfaces. If you registered sema with an older version of sema (which wrote to `.claude/settings.json`), remove the old config and re-register:
+`sema init --claude` now uses `claude mcp add -s user` which writes to the correct location for all interfaces. If you registered sema with an older version of sema (which wrote to `.claude/settings.json`), remove the old config and re-register:
 
 ```bash
 # Remove old project-level config if present
@@ -572,7 +580,7 @@ cat your-project/.claude/settings.json   # check if sema is in here
 
 # Re-register correctly
 cd your-project
-sema init
+sema init --claude
 ```
 
 ---
@@ -581,7 +589,7 @@ sema init
 
 **The cause:** When VS Code opens a `.code-workspace` file, the Claude Code extension does NOT read the `"mcp"` section inside the workspace file. It also does NOT read `.claude/settings.json` from the workspace parent directory.
 
-**The fix:** `sema init` registers sema at the user level (`-s user`) which works for all workspaces. Make sure you ran it:
+**The fix:** `sema init --claude` registers sema at the user level (`-s user`) which works for all workspaces. Make sure you ran it:
 
 ```bash
 claude mcp list   # should show sema
@@ -593,11 +601,11 @@ If sema is listed there but still not showing in `/mcp` inside VS Code, reload t
 
 ---
 
-### Claude is connected to sema but never calls the tools
+### AI is connected to sema but never calls the tools
 
 Two causes:
 
-**1. Tools not yet approved**
+**1. Tools not yet approved** (Claude Code)
 
 The first time Claude tries to call a sema tool, VS Code asks for permission. If you dismissed that prompt, the tools are blocked.
 
@@ -609,25 +617,29 @@ use search_code to find authentication logic
 
 When prompted "Allow sema to run search_code?", click **Allow Always**.
 
-**2. No CLAUDE.md in the project**
+**2. No instruction file in the project**
 
-Without a CLAUDE.md, Claude defaults to its own navigation strategy (Bash, Read). The CLAUDE.md is what tells Claude to call `search_code()` first.
+Without a `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex), the AI defaults to its own navigation strategy (Bash, Read). These files tell it to call `search_code()` first.
 
-Check if the file exists at the git root of the project you're working in:
-
+For Claude Code, check:
 ```bash
 cat your-project/CLAUDE.md
 ```
 
-If it's missing or doesn't mention sema, add it. See [Add CLAUDE.md to your project](#add-claudemd-to-your-project) for the template.
+For Codex, check:
+```bash
+cat your-project/AGENTS.md
+```
 
-> **Workspace note:** CLAUDE.md must be in each project's git root folder. A CLAUDE.md at the workspace parent directory is not read by Claude Code.
+If missing or not mentioning sema, add the template. See [Add `CLAUDE.md` to your project](#add-claudemd-to-your-project) and [Add `AGENTS.md` to your project](#add-agentsmd-to-your-project) for templates.
+
+> **Workspace note:** `CLAUDE.md` must be in each project's git root folder. A `CLAUDE.md` at the workspace parent directory is not read by Claude Code.
 
 ---
 
-### `sema init --uninstall` did not remove sema
+### `sema init --claude --uninstall` did not remove sema
 
-`sema init --uninstall` calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. If sema still appears after uninstalling:
+`sema init --claude --uninstall` calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. If sema still appears after uninstalling:
 
 ```bash
 # Verify it was removed
@@ -669,12 +681,21 @@ This deletes the vector database and metadata. Run `sema index .` to rebuild.
 
 ### Deactivate sema for a project (keep index)
 
+For Claude Code:
 ```bash
 cd your-project
-sema init --uninstall
+sema init --claude --uninstall
 ```
 
-This calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. To re-activate, run `sema init` again.
+This calls `claude mcp remove sema -s user` and kills any running `sema serve` processes. To re-activate, run `sema init --claude` again.
+
+For Codex:
+```bash
+cd your-project
+sema init --codex --uninstall
+```
+
+This removes the `[mcp_servers.sema]` block from `.codex/config.toml`.
 
 ### Update sema to the latest version
 
@@ -701,7 +722,9 @@ Your existing project indexes are untouched — no need to re-run `sema index .`
 
 ```bash
 # 1. Deactivate from all projects first
-cd your-project && sema init --uninstall
+cd your-project && sema init --claude --uninstall
+# or for Codex projects:
+cd your-project && sema init --codex --uninstall
 
 # 2. Delete the sema repo and virtual environment
 rm -rf /path/to/sema
@@ -740,7 +763,7 @@ sema serve --project .                        Start MCP server (called automatic
 
 ## MCP tools
 
-These are the tools Claude calls during a session. You never call them directly.
+These are the tools your AI assistant calls during a session. You never call them directly.
 
 | Tool | Input | Returns | Tokens |
 |---|---|---|---|
@@ -985,20 +1008,20 @@ Known limitations in the current version (v0.1.x):
 
 ## FAQ
 
-**Why is Claude Code so slow at the start of a session?**
-Claude Code has no persistent memory of your codebase between sessions. Every new chat starts cold — Claude has to run `find`, read files, and explore directories to build context before it can help. On a project with 50+ files this costs thousands of tokens and tens of seconds before Claude writes a single line of code. Sema solves this by pre-indexing your codebase so Claude can search instead of explore.
+**Why is Claude Code / Codex so slow at the start of a session?**
+Both Claude Code and Codex start every session cold — no persistent memory of your codebase. The AI has to run `find`, read files, and explore directories to build context before it can help. On a project with 50+ files this costs thousands of tokens and tens of seconds before it writes a single line of code. Sema solves this by pre-indexing your codebase so the AI can search instead of explore.
 
-**Why does Claude Code use so many tokens?**
-The main culprit is file navigation. Without an index, Claude reads entire files to find the one function it needs. On a 1,000-file TypeScript project, a single "how does auth work?" question can consume 10,000+ tokens just in file reads. Sema's `search_code()` returns only the relevant signatures (~180 tokens), and `get_code()` fetches only the exact function body needed (~300–500 tokens each).
+**Why does Claude Code / Codex use so many tokens?**
+The main culprit is file navigation. Without an index, the AI reads entire files to find the one function it needs. On a 1,000-file TypeScript project, a single "how does auth work?" question can consume 10,000+ tokens just in file reads. Sema's `search_code()` returns only the relevant signatures (~180 tokens), and `get_code()` fetches only the exact function body needed (~300–500 tokens each).
 
-**How do I speed up Claude Code on a large codebase?**
-Install Sema, run `sema index .` once in your project, then `sema init` to register it with Claude Code. Add a `CLAUDE.md` file that tells Claude to call `search_code()` first. From that point on Claude searches your index instead of reading files — typically 5–10× fewer tool calls per question.
+**How do I speed up Claude Code or Codex on a large codebase?**
+Install sema, run `sema index .` once in your project, then `sema init --claude` or `sema init --codex` to register it. Add a `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex) file that tells the AI to call `search_code()` first. From that point on it searches your index instead of reading files — typically 5–10× fewer tool calls per question.
 
 **Does sema send my code to any external service?**
 No. Sema runs entirely on your machine. The embedding model (`all-MiniLM-L6-v2`) is downloaded once (~80MB) and cached locally. No API keys, no internet connection required after setup, no data leaves your machine.
 
-**What is an MCP server for Claude Code?**
-MCP (Model Context Protocol) is the standard that Claude Code uses to call external tools. Sema registers itself as a local MCP server — Claude Code connects to it over stdio and gains five new tools: `search_code`, `get_code`, `find_usages`, `repo_map`, and `explain_file`. These tools give Claude structured access to your codebase without reading raw files.
+**What is an MCP server?**
+MCP (Model Context Protocol) is the standard that Claude Code and Codex use to call external tools. Sema registers itself as a local MCP server — your AI assistant connects to it over stdio and gains new tools: `search_code`, `get_code`, `find_usages`, `repo_map`, `explain_file`, and `impact_analysis`. These tools give the AI structured access to your codebase without reading raw files.
 
 **Does sema work with TypeScript, Python, Go, and other languages?**
 Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go (symbol-level granularity). All other languages and formats — including Rust, Java, Ruby, Markdown, JSON, YAML, CSS, SQL, and more — are indexed via text chunking, which makes them searchable even without symbol extraction.
