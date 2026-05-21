@@ -264,10 +264,11 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path) -> None:
 
     changed, config_path = _codex_config_add(project_root)
     if changed:
-        console.print(f"[green]✔[/green] Added \\[mcp_servers.sema] to {config_path}")
+        console.print(f"[green]✔[/green] Registered as MCP server 'sema' (project scope)")
+        console.print(f"[dim]  {config_path}[/dim]")
     else:
-        console.print(f"[yellow]–[/yellow] \\[mcp_servers.sema] already present in {config_path}")
-    console.print("\n[bold]Done.[/bold] Restart Codex to load the MCP server.")
+        console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
+    console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Codex to confirm.")
 
 
 @main.command()
