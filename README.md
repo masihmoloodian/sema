@@ -625,17 +625,37 @@ pkill -f "sema serve"
 
 ---
 
+### `ModuleNotFoundError: No module named 'sema'`
+
+This means the `sema` binary on your PATH points to a venv where the package is not installed.
+
+```bash
+# 1. Find which binary is being called
+which sema
+
+# 2. Run the doctor command to diagnose
+sema doctor
+
+# 3. Fix — go to the sema source directory and install
+cd /path/to/sema
+uv pip install -e ".[dev]"
+```
+
+The most common cause: you cloned sema to a second location, set PATH to that venv, but never ran `uv pip install -e .` there.
+
+---
+
 ### sema shows as **Failed** in `/mcp`
 
 This means Claude Code found the sema entry in config but the server process crashed on startup. The most common cause: the registered binary path is wrong.
 
-**Check what path is registered:**
+**Check what is registered and what it's serving:**
 
 ```bash
-claude mcp list
+sema status
 ```
 
-Look at the path next to `sema`. If it points to the wrong location — e.g. a venv you deleted or an old clone — the server can't start.
+This shows the registered binary path and which project the MCP server is pointed at. If the path is wrong or the binary doesn't exist, you'll see a warning with the exact fix.
 
 **Fix: re-register after PATH is correct**
 
@@ -657,6 +677,32 @@ This commonly happens when:
 - You moved the sema folder after registering
 
 The rule: always run `sema init --claude` **after** confirming `which sema` returns the path you want.
+
+---
+
+### sema returns results from the wrong project
+
+This happens when the MCP server was registered from project A, then you open project B. The server is still serving project A's index.
+
+**Diagnose:**
+
+```bash
+sema status
+```
+
+The `Serving` line shows which project the server is pointed at. If it doesn't match your current directory, you'll see a yellow warning with the exact fix command.
+
+**Fix:**
+
+```bash
+cd your-project
+sema init --claude --uninstall
+sema init --claude
+```
+
+Then reload VS Code. The server will now serve the current project's index.
+
+> **Note:** sema uses user-scope registration — one project at a time. If you work across multiple projects, re-run `sema init --claude` each time you switch. A per-project registration mode is on the roadmap.
 
 ---
 
@@ -761,7 +807,9 @@ sema init --codex --uninstall                 Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10               Return more results
 sema search "query" --all-types               Include docs/config sections in results
-sema status                                   Show index stats (chunks, files, model, last updated)
+sema status                                   Show index stats and which project the MCP server is serving
+sema status --verbose                         Full details: index path, language breakdown, binary, registered command
+sema doctor                                   Diagnose installation and registration issues
 sema serve --project .                        Start MCP server (called automatically by Claude Code or Codex)
 ```
 

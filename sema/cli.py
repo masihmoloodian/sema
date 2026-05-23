@@ -327,28 +327,128 @@ def search(query: str, top_k: int, all_types: bool):
 
 
 @main.command()
-def status():
+@click.option("--verbose", "-v", is_flag=True, help="Show full details including MCP registration and binary paths.")
+def status(verbose: bool):
     """Show index stats and MCP registration status."""
+    import subprocess
+    import shutil as _shutil
+
     project_root = Path(".").resolve()
     meta_path = project_root / DEFAULT_META_FILE
 
+    # ── Index ─────────────────────────────────────────────────────────────────
+    console.print()
+    index_path = project_root / DEFAULT_INDEX_DIR
     if not meta_path.exists():
-        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
-        return
+        console.print(f"[bold]Index[/bold]  [red]✗ No index found[/red] — run [bold]sema index .[/bold]")
+    else:
+        meta = json.loads(meta_path.read_text())
 
-    meta = json.loads(meta_path.read_text())
+        # Read live counts from ChromaDB — meta.json only stores last-run delta
+        total_chunks = "?"
+        total_files = "?"
+        try:
+            from .store.chroma import SemaStore
+            store = SemaStore(index_path)
+            all_meta = store.get_all_metadata()
+            total_chunks = len(all_meta)
+            total_files = len({m.get("file", "") for m in all_meta if m.get("file")})
+        except Exception:
+            total_chunks = meta.get("chunk_count", meta.get("chunks", "?"))
+            total_files = meta.get("file_count", meta.get("files", "?"))
 
-    table = Table(title="sema status", show_header=False)
-    table.add_column("Key", style="dim")
-    table.add_column("Value")
-    table.add_row("Project", str(project_root))
-    table.add_row("Index", DEFAULT_INDEX_DIR)
-    table.add_row("Chunks", str(meta.get("chunk_count", "?")))
-    table.add_row("Files", str(meta.get("file_count", "?")))
-    table.add_row("Model", meta.get("model", "?"))
-    table.add_row("Updated", meta.get("indexed_at", "?"))
-    table.add_row("sema version", meta.get("sema_version", "?"))
-    console.print(table)
+        console.print(f"[bold]Index[/bold]")
+        console.print(f"  Project  {project_root}")
+        console.print(f"  Chunks   {total_chunks}")
+        console.print(f"  Files    {total_files}")
+        console.print(f"  Updated  {meta.get('indexed_at', '?')}")
+        console.print(f"  Model    {meta.get('model', '?')}")
+        if verbose:
+            console.print(f"  Path     {project_root / DEFAULT_INDEX_DIR}")
+            console.print(f"  Version  {meta.get('sema_version', '?')}")
+            langs = meta.get("languages", {})
+            if langs:
+                console.print(f"  Languages")
+                for lang, count in sorted(langs.items()):
+                    console.print(f"    [dim]{lang}: {count}[/dim]")
+
+    # ── MCP server — what project is it serving? ──────────────────────────────
+    console.print()
+    console.print(f"[bold]MCP server[/bold]")
+
+    # Claude Code
+    claude = _shutil.which("claude")
+    if claude:
+        result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True)
+        output = result.stdout + result.stderr
+        if "sema" in output:
+            for line in output.splitlines():
+                if "sema" in line and ":" in line:
+                    # Extract the --project path from the registered command
+                    serving = None
+                    if "--project" in line:
+                        parts = line.split("--project")
+                        if len(parts) > 1:
+                            serving = parts[1].strip().split()[0]
+
+                    if "Failed" in line:
+                        console.print(f"  Claude Code  [red]✗ Failed[/red]")
+                        console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                    elif "Connected" in line or "✓" in line:
+                        console.print(f"  Claude Code  [green]✔ Connected[/green]")
+                    else:
+                        console.print(f"  Claude Code  [yellow]registered[/yellow]")
+
+                    if serving:
+                        match = "✔" if Path(serving).resolve() == project_root else "⚠ "
+                        color = "green" if match == "✔" else "yellow"
+                        console.print(f"  Serving      [{color}]{serving}[/{color}]")
+                        if match == "⚠ " :
+                            console.print(f"  [yellow]  ⚠  Server is indexed to a different project than cwd[/yellow]")
+                            console.print(f"  [dim]     cwd:      {project_root}[/dim]")
+                            console.print(f"  [dim]     serving:  {serving}[/dim]")
+                            console.print(f"  [dim]     Fix: cd {project_root} && sema init --claude --uninstall && sema init --claude[/dim]")
+
+                    if verbose:
+                        console.print(f"  [dim]  {line.strip()}[/dim]")
+        else:
+            console.print(f"  Claude Code  [yellow]–[/yellow] not registered — run: sema init --claude")
+    else:
+        console.print(f"  Claude Code  [dim]claude CLI not found[/dim]")
+
+    # Codex
+    codex_config = project_root / ".codex" / "config.toml"
+    if codex_config.exists():
+        content = codex_config.read_text()
+        if "[mcp_servers.sema]" in content:
+            serving = None
+            for line in content.splitlines():
+                if "--project" in line:
+                    serving = line.split("--project")[-1].strip().strip('"').split()[0]
+            console.print(f"  Codex        [green]✔ Registered[/green]")
+            if serving:
+                match = Path(serving).resolve() == project_root
+                color = "green" if match else "yellow"
+                console.print(f"  Serving      [{color}]{serving}[/{color}]")
+                if not match:
+                    console.print(f"  [yellow]  ⚠  Codex config points to a different project than cwd[/yellow]")
+                    console.print(f"  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+            if verbose:
+                console.print(f"  [dim]  config: {codex_config}[/dim]")
+        else:
+            console.print(f"  Codex        [yellow]–[/yellow] not registered — run: sema init --codex")
+    else:
+        console.print(f"  Codex        [dim]–[/dim] no .codex/config.toml")
+
+    # Binary
+    if verbose:
+        console.print()
+        console.print(f"[bold]Binary[/bold]")
+        binary = _shutil.which("sema")
+        console.print(f"  Path     {binary or '[red]not found[/red]'}")
+        import sys
+        console.print(f"  Python   {sys.executable}")
+    console.print()
 
 
 @main.command()
@@ -419,3 +519,186 @@ def serve(project: str):
     project_root = Path(project).resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
     _serve(project_root, index_path)
+
+
+@main.command()
+def doctor():
+    """Diagnose sema installation and registration issues."""
+    import sys
+    import subprocess
+    from datetime import datetime, timezone
+
+    ok = True
+    warnings = 0
+
+    # ── 1. Binary ────────────────────────────────────────────────────────────
+    binary = shutil.which("sema")
+    console.print(f"\n[bold]1. Binary[/bold]")
+    if binary:
+        console.print(f"  [green]✔[/green] Found: {binary}")
+    else:
+        console.print(f"  [red]✗[/red] sema not found on PATH")
+        console.print(f"  [dim]  Fix: add sema's .venv/bin to PATH, then source ~/.zshrc[/dim]")
+        ok = False
+
+    # ── 2. Venv mismatch ─────────────────────────────────────────────────────
+    console.print(f"\n[bold]2. Python environment[/bold]")
+    python = sys.executable
+    console.print(f"  [dim]  Python: {python}[/dim]")
+    if binary:
+        binary_venv = Path(binary).parent.parent
+        python_venv = Path(python).parent.parent
+        if binary_venv == python_venv:
+            console.print(f"  [green]✔[/green] Binary and Python are in the same venv")
+        else:
+            console.print(f"  [red]✗[/red] Venv mismatch")
+            console.print(f"  [dim]  Binary:  {binary_venv}[/dim]")
+            console.print(f"  [dim]  Python:  {python_venv}[/dim]")
+            console.print(f"  [dim]  Fix: re-register after confirming `which sema` is correct[/dim]")
+            ok = False
+
+    # ── 3. Package importable ────────────────────────────────────────────────
+    console.print(f"\n[bold]3. Package[/bold]")
+    try:
+        import sema  # noqa: F401
+        console.print(f"  [green]✔[/green] sema package importable")
+    except ImportError:
+        console.print(f"  [red]✗[/red] sema package not installed in this venv")
+        console.print(f"  [dim]  Fix: cd /path/to/sema && uv pip install -e '.[dev]'[/dim]")
+        ok = False
+
+    # ── 4. Claude Code registration ──────────────────────────────────────────
+    console.print(f"\n[bold]4. Claude Code registration[/bold]")
+    claude = shutil.which("claude")
+    if claude:
+        result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True)
+        output = result.stdout + result.stderr
+        if "sema" in output:
+            for line in output.splitlines():
+                if "sema" in line and ":" in line:
+                    if "Failed" in line:
+                        console.print(f"  [red]✗[/red] {line.strip()}")
+                        console.print(f"  [dim]  Registered binary may be wrong — run: sema init --claude --uninstall && sema init --claude[/dim]")
+                        ok = False
+                    elif "Connected" in line or "✓" in line:
+                        console.print(f"  [green]✔[/green] {line.strip()}")
+                    else:
+                        console.print(f"  [dim]  {line.strip()}[/dim]")
+            # Check if registered binary actually exists
+            for line in output.splitlines():
+                if "sema" in line and "/" in line:
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith("/") and "sema" in part and not part.endswith("sema"):
+                            continue
+                        if part.startswith("/") and part.endswith("sema"):
+                            if not Path(part).exists():
+                                console.print(f"  [red]✗[/red] Registered binary does not exist: {part}")
+                                console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                                ok = False
+        else:
+            console.print(f"  [yellow]–[/yellow] sema not registered with Claude Code")
+            console.print(f"  [dim]  Fix: sema init --claude[/dim]")
+            warnings += 1
+
+        # Check for stale project-level config (old sema versions wrote here)
+        old_config = Path(".claude/settings.json")
+        if old_config.exists():
+            try:
+                old_data = json.loads(old_config.read_text())
+                if "mcpServers" in old_data and "sema" in old_data["mcpServers"]:
+                    console.print(f"  [yellow]⚠[/yellow]  Old project-level config found: {old_config}")
+                    console.print(f"  [dim]  This can conflict with user-level registration.[/dim]")
+                    console.print(f"  [dim]  Fix: remove the 'sema' key from {old_config}[/dim]")
+                    warnings += 1
+            except Exception:
+                pass
+    else:
+        console.print(f"  [dim]–[/dim] claude CLI not found — skipping")
+
+    # ── 5. Codex registration ────────────────────────────────────────────────
+    console.print(f"\n[bold]5. Codex registration[/bold]")
+    codex_config = Path(".codex/config.toml")
+    if codex_config.exists():
+        content = codex_config.read_text()
+        if "[mcp_servers.sema]" in content:
+            console.print(f"  [green]✔[/green] Registered in {codex_config}")
+            # Check if the binary path inside config exists
+            for line in content.splitlines():
+                if line.strip().startswith("command"):
+                    cmd_path = line.split("=", 1)[1].strip().strip('"')
+                    if not Path(cmd_path).exists():
+                        console.print(f"  [red]✗[/red] Registered binary does not exist: {cmd_path}")
+                        console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                        ok = False
+        else:
+            console.print(f"  [yellow]–[/yellow] .codex/config.toml exists but sema not registered")
+            console.print(f"  [dim]  Fix: sema init --codex[/dim]")
+            warnings += 1
+    else:
+        console.print(f"  [dim]–[/dim] No .codex/config.toml — run sema init --codex if using Codex")
+
+    # ── 6. Instruction file ──────────────────────────────────────────────────
+    console.print(f"\n[bold]6. Instruction file (CLAUDE.md / AGENTS.md)[/bold]")
+    claude_md = Path("CLAUDE.md")
+    agents_md = Path("AGENTS.md")
+    found_any = False
+    for f in [claude_md, agents_md]:
+        if f.exists():
+            content = f.read_text()
+            if "search_code" in content:
+                console.print(f"  [green]✔[/green] {f} found and mentions search_code")
+            else:
+                console.print(f"  [yellow]⚠[/yellow]  {f} found but does not mention sema tools")
+                console.print(f"  [dim]  Without search_code instructions the AI may not use sema[/dim]")
+                warnings += 1
+            found_any = True
+    if not found_any:
+        console.print(f"  [yellow]⚠[/yellow]  No CLAUDE.md or AGENTS.md in current directory")
+        console.print(f"  [dim]  Without this file the AI may ignore sema and read files directly[/dim]")
+        warnings += 1
+
+    # ── 7. Lingering processes ───────────────────────────────────────────────
+    console.print(f"\n[bold]7. Running processes[/bold]")
+    result = subprocess.run(["pgrep", "-f", "sema serve"], capture_output=True, text=True)
+    pids = [p.strip() for p in result.stdout.splitlines() if p.strip()]
+    if pids:
+        console.print(f"  [green]✔[/green] sema serve running (pid {', '.join(pids)})")
+    else:
+        console.print(f"  [dim]–[/dim] No sema serve process running (started on demand by AI tool)")
+
+    # ── 8. Index ─────────────────────────────────────────────────────────────
+    console.print(f"\n[bold]8. Index[/bold]")
+    index_path = Path(".") / DEFAULT_INDEX_DIR
+    meta_path = Path(".") / DEFAULT_META_FILE
+    if index_path.exists():
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            console.print(f"  [green]✔[/green] Index found — {meta.get('files', '?')} files, {meta.get('chunks', '?')} chunks")
+            console.print(f"  [dim]  model: {meta.get('model', '?')}[/dim]")
+            # Warn if index is old
+            ts = meta.get("indexed_at")
+            if ts:
+                try:
+                    age = datetime.now(timezone.utc) - datetime.fromisoformat(ts)
+                    days = age.days
+                    if days > 7:
+                        console.print(f"  [yellow]⚠[/yellow]  Index is {days} days old — consider re-indexing: sema index .")
+                        warnings += 1
+                except Exception:
+                    pass
+        else:
+            console.print(f"  [green]✔[/green] Index directory exists")
+    else:
+        console.print(f"  [yellow]–[/yellow] No index in current directory")
+        console.print(f"  [dim]  Fix: sema index .[/dim]")
+        warnings += 1
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    console.print()
+    if ok and warnings == 0:
+        console.print("[green]✔ Everything looks good.[/green]")
+    elif ok:
+        console.print(f"[yellow]⚠  No errors, but {warnings} warning(s) — see above.[/yellow]")
+    else:
+        console.print("[red]✗ Issues found — see above.[/red]")
