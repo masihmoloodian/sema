@@ -625,6 +625,41 @@ pkill -f "sema serve"
 
 ---
 
+### sema shows as **Failed** in `/mcp`
+
+This means Claude Code found the sema entry in config but the server process crashed on startup. The most common cause: the registered binary path is wrong.
+
+**Check what path is registered:**
+
+```bash
+claude mcp list
+```
+
+Look at the path next to `sema`. If it points to the wrong location — e.g. a venv you deleted or an old clone — the server can't start.
+
+**Fix: re-register after PATH is correct**
+
+```bash
+# Make sure sema on your PATH is the right one
+which sema
+
+# Remove old registration and re-register
+sema init --claude --uninstall
+sema init --claude
+
+# Reload VS Code
+# Cmd+Shift+P → Developer: Reload Window
+```
+
+This commonly happens when:
+- You cloned sema to a second location (e.g. `~/Desktop/sema`) and registered from there, then later fixed your PATH to point elsewhere
+- You deleted or rebuilt the `.venv` after registering
+- You moved the sema folder after registering
+
+The rule: always run `sema init --claude` **after** confirming `which sema` returns the path you want.
+
+---
+
 ### Index is stale — search results look wrong
 
 The index reflects the state of your files at the time `sema index .` was last run. If you've made significant changes since then:
