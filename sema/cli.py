@@ -415,6 +415,8 @@ def status(verbose: bool):
                     _print_serving(serving, project_root, "sema init --claude --uninstall && sema init --claude")
 
                     if verbose:
+                        claude_cfg = Path.home() / ".claude.json"
+                        console.print(f"  [dim]  config:  {claude_cfg}[/dim]")
                         console.print(f"  [dim]  command: {serving and f'sema serve --project {serving}'}[/dim]")
         else:
             console.print(f"  Claude Code  [yellow]–[/yellow] not registered — run: sema init --claude")
