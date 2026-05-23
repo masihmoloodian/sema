@@ -544,6 +544,7 @@ def doctor():
 
     ok = True
     warnings = 0
+    project_root = Path(".").resolve()
 
     # ── 1. Binary ────────────────────────────────────────────────────────────
     binary = shutil.which("sema")
@@ -582,69 +583,107 @@ def doctor():
         ok = False
 
     # ── 4. Claude Code registration ──────────────────────────────────────────
+    import re as _re
     console.print(f"\n[bold]4. Claude Code registration[/bold]")
+    claude_cfg = Path.home() / ".claude.json"
+    console.print(f"  [dim]  config: {claude_cfg}[/dim]")
     claude = shutil.which("claude")
-    if claude:
-        result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True)
-        output = result.stdout + result.stderr
-        if "sema" in output:
-            for line in output.splitlines():
-                if "sema" in line and ":" in line:
-                    if "Failed" in line:
-                        console.print(f"  [red]✗[/red] {line.strip()}")
-                        console.print(f"  [dim]  Registered binary may be wrong — run: sema init --claude --uninstall && sema init --claude[/dim]")
-                        ok = False
-                    elif "Connected" in line or "✓" in line:
-                        console.print(f"  [green]✔[/green] {line.strip()}")
-                    else:
-                        console.print(f"  [dim]  {line.strip()}[/dim]")
-            # Check if registered binary actually exists
-            for line in output.splitlines():
-                if "sema" in line and "/" in line:
-                    parts = line.split()
-                    for part in parts:
-                        if part.startswith("/") and "sema" in part and not part.endswith("sema"):
-                            continue
-                        if part.startswith("/") and part.endswith("sema"):
-                            if not Path(part).exists():
-                                console.print(f"  [red]✗[/red] Registered binary does not exist: {part}")
-                                console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
-                                ok = False
-        else:
-            console.print(f"  [yellow]–[/yellow] sema not registered with Claude Code")
-            console.print(f"  [dim]  Fix: sema init --claude[/dim]")
-            warnings += 1
 
-        # Check for stale project-level config (old sema versions wrote here)
-        old_config = Path(".claude/settings.json")
-        if old_config.exists():
-            try:
-                old_data = json.loads(old_config.read_text())
-                if "mcpServers" in old_data and "sema" in old_data["mcpServers"]:
-                    console.print(f"  [yellow]⚠[/yellow]  Old project-level config found: {old_config}")
-                    console.print(f"  [dim]  This can conflict with user-level registration.[/dim]")
-                    console.print(f"  [dim]  Fix: remove the 'sema' key from {old_config}[/dim]")
-                    warnings += 1
-            except Exception:
-                pass
+    # Read config directly — more reliable than parsing `claude mcp list` output
+    claude_entry: dict | None = None
+    if claude_cfg.exists():
+        try:
+            claude_data = json.loads(claude_cfg.read_text())
+            claude_entry = claude_data.get("mcpServers", {}).get("sema")
+        except Exception:
+            pass
+
+    if claude_entry:
+        reg_binary = claude_entry.get("command", "")
+        reg_args   = claude_entry.get("args", [])
+        reg_project = None
+        for i, a in enumerate(reg_args):
+            if a == "--project" and i + 1 < len(reg_args):
+                reg_project = reg_args[i + 1]
+
+        console.print(f"  [dim]  binary:  {reg_binary}[/dim]")
+        if reg_project:
+            console.print(f"  [dim]  project: {reg_project}[/dim]")
+
+        # Check binary exists
+        if not Path(reg_binary).exists():
+            console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
+            console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+            ok = False
+        else:
+            # Cross-check with `claude mcp list` for live status
+            if claude:
+                result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True)
+                mcp_output = result.stdout + result.stderr
+                if "Failed" in mcp_output and "sema" in mcp_output:
+                    console.print(f"  [red]✗[/red] Registered but Claude reports Failed")
+                    console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                    ok = False
+                else:
+                    console.print(f"  [green]✔[/green] Registered and binary exists")
+
+            # Check if registered project matches cwd
+            if reg_project and Path(reg_project).resolve() != project_root:
+                console.print(f"  [yellow]⚠[/yellow]  Registered project does not match cwd")
+                console.print(f"  [dim]     registered: {reg_project}[/dim]")
+                console.print(f"  [dim]     cwd:        {project_root}[/dim]")
+                console.print(f"  [dim]     Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                warnings += 1
     else:
-        console.print(f"  [dim]–[/dim] claude CLI not found — skipping")
+        console.print(f"  [yellow]–[/yellow] sema not registered — run: sema init --claude")
+        warnings += 1
+
+    # Check for stale project-level config (old sema versions wrote here)
+    old_config = Path(".claude/settings.json")
+    if old_config.exists():
+        try:
+            old_data = json.loads(old_config.read_text())
+            if "mcpServers" in old_data and "sema" in old_data["mcpServers"]:
+                console.print(f"  [yellow]⚠[/yellow]  Old project-level config found: {old_config}")
+                console.print(f"  [dim]  This can conflict with user-level registration.[/dim]")
+                console.print(f"  [dim]  Fix: remove the 'sema' key from {old_config}[/dim]")
+                warnings += 1
+        except Exception:
+            pass
+
+    if not claude:
+        console.print(f"  [dim]  (claude CLI not found — live status check skipped)[/dim]")
 
     # ── 5. Codex registration ────────────────────────────────────────────────
     console.print(f"\n[bold]5. Codex registration[/bold]")
     codex_config = Path(".codex/config.toml")
+    console.print(f"  [dim]  config: {codex_config.resolve()}[/dim]")
     if codex_config.exists():
         content = codex_config.read_text()
         if "[mcp_servers.sema]" in content:
-            console.print(f"  [green]✔[/green] Registered in {codex_config}")
-            # Check if the binary path inside config exists
-            for line in content.splitlines():
-                if line.strip().startswith("command"):
-                    cmd_path = line.split("=", 1)[1].strip().strip('"')
-                    if not Path(cmd_path).exists():
-                        console.print(f"  [red]✗[/red] Registered binary does not exist: {cmd_path}")
-                        console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
-                        ok = False
+            cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
+            pm = _re.search(r'"--project",\s*"([^"]+)"', content)
+            reg_binary  = cm.group(1) if cm else None
+            reg_project = pm.group(1) if pm else None
+
+            if reg_binary:
+                console.print(f"  [dim]  binary:  {reg_binary}[/dim]")
+            if reg_project:
+                console.print(f"  [dim]  project: {reg_project}[/dim]")
+
+            if reg_binary and not Path(reg_binary).exists():
+                console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
+                console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                ok = False
+            else:
+                console.print(f"  [green]✔[/green] Registered and binary exists")
+
+            if reg_project and Path(reg_project).resolve() != project_root:
+                console.print(f"  [yellow]⚠[/yellow]  Registered project does not match cwd")
+                console.print(f"  [dim]     registered: {reg_project}[/dim]")
+                console.print(f"  [dim]     cwd:        {project_root}[/dim]")
+                console.print(f"  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                warnings += 1
         else:
             console.print(f"  [yellow]–[/yellow] .codex/config.toml exists but sema not registered")
             console.print(f"  [dim]  Fix: sema init --codex[/dim]")
@@ -688,7 +727,7 @@ def doctor():
     if index_path.exists():
         if meta_path.exists():
             meta = json.loads(meta_path.read_text())
-            console.print(f"  [green]✔[/green] Index found — {meta.get('files', '?')} files, {meta.get('chunks', '?')} chunks")
+            console.print(f"  [green]✔[/green] Index found — {meta.get('file_count', '?')} files, {meta.get('chunk_count', '?')} chunks")
             console.print(f"  [dim]  model: {meta.get('model', '?')}[/dim]")
             # Warn if index is old
             ts = meta.get("indexed_at")
