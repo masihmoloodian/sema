@@ -422,9 +422,11 @@ def status(verbose: bool):
         content = codex_config.read_text()
         if "[mcp_servers.sema]" in content:
             serving = None
-            for line in content.splitlines():
-                if "--project" in line:
-                    serving = line.split("--project")[-1].strip().strip('"').split()[0]
+            import re as _re
+            # TOML args line: args = ["serve", "--project", "/path/to/project"]
+            m = _re.search(r'"--project",\s*"([^"]+)"', content)
+            if m:
+                serving = m.group(1)
             console.print(f"  Codex        [green]✔ Registered[/green]")
             if serving:
                 match = Path(serving).resolve() == project_root
