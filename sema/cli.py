@@ -373,6 +373,20 @@ def status(verbose: bool):
                     console.print(f"    [dim]{lang}: {count}[/dim]")
 
     # ── MCP server — what project is it serving? ──────────────────────────────
+    import re as _re
+
+    def _print_serving(serving: str | None, project_root: Path, fix_cmd: str) -> None:
+        if not serving:
+            return
+        match = Path(serving).resolve() == project_root
+        color = "green" if match else "yellow"
+        console.print(f"  Serving      [{color}]{serving}[/{color}]")
+        if not match:
+            console.print(f"  [yellow]  ⚠  Serving a different project than cwd[/yellow]")
+            console.print(f"  [dim]     cwd:     {project_root}[/dim]")
+            console.print(f"  [dim]     serving: {serving}[/dim]")
+            console.print(f"  [dim]     Fix: {fix_cmd}[/dim]")
+
     console.print()
     console.print(f"[bold]MCP server[/bold]")
 
@@ -384,7 +398,6 @@ def status(verbose: bool):
         if "sema" in output:
             for line in output.splitlines():
                 if "sema" in line and ":" in line:
-                    # Extract the --project path from the registered command
                     serving = None
                     if "--project" in line:
                         parts = line.split("--project")
@@ -397,24 +410,16 @@ def status(verbose: bool):
                     elif "Connected" in line or "✓" in line:
                         console.print(f"  Claude Code  [green]✔ Connected[/green]")
                     else:
-                        console.print(f"  Claude Code  [yellow]registered[/yellow]")
+                        console.print(f"  Claude Code  [yellow]⚠ Registered (not connected)[/yellow]")
 
-                    if serving:
-                        match = "✔" if Path(serving).resolve() == project_root else "⚠ "
-                        color = "green" if match == "✔" else "yellow"
-                        console.print(f"  Serving      [{color}]{serving}[/{color}]")
-                        if match == "⚠ " :
-                            console.print(f"  [yellow]  ⚠  Server is indexed to a different project than cwd[/yellow]")
-                            console.print(f"  [dim]     cwd:      {project_root}[/dim]")
-                            console.print(f"  [dim]     serving:  {serving}[/dim]")
-                            console.print(f"  [dim]     Fix: cd {project_root} && sema init --claude --uninstall && sema init --claude[/dim]")
+                    _print_serving(serving, project_root, "sema init --claude --uninstall && sema init --claude")
 
                     if verbose:
-                        console.print(f"  [dim]  {line.strip()}[/dim]")
+                        console.print(f"  [dim]  command: {serving and f'sema serve --project {serving}'}[/dim]")
         else:
             console.print(f"  Claude Code  [yellow]–[/yellow] not registered — run: sema init --claude")
     else:
-        console.print(f"  Claude Code  [dim]claude CLI not found[/dim]")
+        console.print(f"  Claude Code  [dim]–[/dim] claude CLI not found")
 
     # Codex
     codex_config = project_root / ".codex" / "config.toml"
@@ -422,25 +427,30 @@ def status(verbose: bool):
         content = codex_config.read_text()
         if "[mcp_servers.sema]" in content:
             serving = None
-            import re as _re
-            # TOML args line: args = ["serve", "--project", "/path/to/project"]
             m = _re.search(r'"--project",\s*"([^"]+)"', content)
             if m:
                 serving = m.group(1)
-            console.print(f"  Codex        [green]✔ Registered[/green]")
-            if serving:
-                match = Path(serving).resolve() == project_root
-                color = "green" if match else "yellow"
-                console.print(f"  Serving      [{color}]{serving}[/{color}]")
-                if not match:
-                    console.print(f"  [yellow]  ⚠  Codex config points to a different project than cwd[/yellow]")
-                    console.print(f"  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+
+            # Check if binary in config exists
+            cmd_ok = True
+            cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
+            if cm and not Path(cm.group(1)).exists():
+                console.print(f"  Codex        [red]✗ Failed[/red]")
+                console.print(f"  [dim]  Binary not found: {cm.group(1)}[/dim]")
+                console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                cmd_ok = False
+
+            if cmd_ok:
+                console.print(f"  Codex        [green]✔ Connected[/green]")
+
+            _print_serving(serving, project_root, "sema init --codex --uninstall && sema init --codex")
+
             if verbose:
-                console.print(f"  [dim]  config: {codex_config}[/dim]")
+                console.print(f"  [dim]  config:  {codex_config}[/dim]")
         else:
             console.print(f"  Codex        [yellow]–[/yellow] not registered — run: sema init --codex")
     else:
-        console.print(f"  Codex        [dim]–[/dim] no .codex/config.toml")
+        console.print(f"  Codex        [dim]–[/dim] not registered — run: sema init --codex")
 
     # Binary
     if verbose:
