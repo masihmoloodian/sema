@@ -51,6 +51,10 @@ sema watch .
 
 Detects file saves and re-indexes only changed files incrementally.
 
+## Multiple projects
+
+To serve several projects from one registration (no re-running `sema init` when you switch repos), see [Working with multiple projects](multi-project.md).
+
 ## Uninstall
 
 ```bash

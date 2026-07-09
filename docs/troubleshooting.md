@@ -220,7 +220,7 @@ sema init --claude
 
 Then reload VS Code. The server will now serve the current project's index.
 
-> **Note:** sema uses user-scope registration — one project at a time. If you work across multiple projects, re-run `sema init --claude` each time you switch. A per-project registration mode is on the roadmap.
+> **Note:** In single-project mode the server serves one project at a time — re-run `sema init --claude` when you switch. To serve several projects at once without re-registering, use [multi-project mode](multi-project.md) (`sema init --claude --root <dir>`).
 
 ---
 

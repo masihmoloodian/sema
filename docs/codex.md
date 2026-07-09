@@ -39,6 +39,10 @@ This project is indexed by sema. Use sema MCP tools to locate code — do not us
 Always call `search_code()` before using grep or reading files directly.
 ```
 
+## Multiple projects
+
+To serve several projects from one registration, see [Working with multiple projects](multi-project.md).
+
 ## Uninstall
 
 ```bash

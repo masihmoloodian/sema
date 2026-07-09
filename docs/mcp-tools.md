@@ -4,12 +4,17 @@ These are the tools your AI assistant calls during a session. You never call the
 
 | Tool | Input | Returns | Tokens |
 |---|---|---|---|
+| `list_projects()` | — | Indexed projects this server serves, with names + chunk counts | ~50–150 |
 | `search_code(query)` | Natural language | Matching function/class signatures + file locations | ~100–200 |
 | `get_code(symbol)` | Exact symbol name | Full source body — all implementations if name appears in multiple files | ~200–500 |
 | `repo_map()` | — | Compressed architecture overview: files + exported symbols | ~400–800 |
 | `find_usages(symbol)` | Symbol name | Call sites and references (signatures only) | ~150–300 |
 | `explain_file(path)` | Relative file path | File summary: exports, classes, functions — no source code | ~100–200 |
 | `impact_analysis(symbol)` | Symbol name | Call graph: what it calls + what calls it, up to 3 levels deep | ~100–400 |
+
+### The `project` argument
+
+Every tool except `list_projects()` accepts an optional `project` argument. It only matters in [multi-project mode](multi-project.md): when the server serves more than one indexed project, pass `project="<name>"` (from `list_projects()`) to pick which one to query. With a single indexed project the argument is optional and ignored.
 
 ## `impact_analysis` — call graph
 

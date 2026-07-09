@@ -13,39 +13,37 @@ so it finds call sites inside bodies, not just matching signatures.
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from ..store.chroma import SemaStore
-from ..store.bm25 import BM25Index
 from ..indexer.embedder import Embedder
 from ..utils.repo_map import generate_repo_map
+from .registry import ProjectRegistry, ProjectHandle, ProjectResolutionError
 
 # search_code only returns code symbols — never config/doc sections
 _CODE_CHUNK_TYPES = ["function", "class", "method", "interface", "struct", "module"]
 
 mcp = FastMCP("sema")
-_store: SemaStore | None = None
-_embedder: Embedder | None = None
-_bm25: BM25Index | None = None
-_project_root: "Path | None" = None
+_registry: ProjectRegistry | None = None
+
+
+def set_registry(registry: ProjectRegistry) -> None:
+    """Bind the tools to a project registry (multi-project mode)."""
+    global _registry
+    _registry = registry
 
 
 def init_tools(store: SemaStore, embedder: Embedder, project_root: "Path | None" = None) -> None:
-    global _store, _embedder, _bm25, _project_root
-    _store = store
-    _embedder = embedder
-    _bm25 = _build_bm25(store)
-    _project_root = project_root
+    """Bind the tools to a single project (backward-compatible single-project mode)."""
+    set_registry(ProjectRegistry.from_single(store, embedder, project_root))
 
 
-def _build_bm25(store: SemaStore) -> BM25Index | None:
-    ids, metadatas = store.get_all_for_bm25()
-    if not ids:
-        return None
-    # BM25 text: name + signature only — body causes too many false positives because
-    # common tokens like "user" appear in every function that touches the domain model.
-    texts = [
-        f"{m['name']} {m['signature']}"
-        for m in metadatas
-    ]
-    return BM25Index(ids, texts, metadatas)
+def _require_registry() -> ProjectRegistry:
+    if _registry is None:
+        raise RuntimeError("Registry not initialized. Call init_tools() or set_registry() first.")
+    return _registry
+
+
+def _resolve(project: str | None) -> ProjectHandle:
+    """Resolve the project name to a handle, or raise ProjectResolutionError."""
+    return _require_registry().resolve(project)
 
 
 def _rrf_merge(
@@ -88,20 +86,37 @@ def _rrf_merge(
     return results
 
 
-def _require_store() -> SemaStore:
-    if _store is None:
-        raise RuntimeError("Store not initialized. Call init_tools() first.")
-    return _store
+@mcp.tool()
+def list_projects() -> str:
+    """
+    List every indexed project this server can search.
 
-
-def _require_embedder() -> Embedder:
-    if _embedder is None:
-        raise RuntimeError("Embedder not initialized. Call init_tools() first.")
-    return _embedder
+    Call this first when you're unsure which project to target. Every other tool
+    accepts a `project` argument — pass one of the names returned here. When only
+    a single project is indexed, the `project` argument is optional everywhere.
+    """
+    registry = _require_registry()
+    registry.maybe_rescan()  # pick up newly-indexed projects without a restart
+    handles = registry.handles()
+    if not handles:
+        return (
+            "No indexed projects are available.\n"
+            "Run `sema index .` inside a project (under a served root) first."
+        )
+    if len(handles) == 1:
+        h = handles[0]
+        return (
+            f"1 project indexed (the `project` argument is optional):\n"
+            f"  • {h.name}  —  {h.project_root}  ({h.chunk_count()} chunks)"
+        )
+    lines = [f"{len(handles)} projects indexed — pass `project=\"<name>\"` to target one:\n"]
+    for h in handles:
+        lines.append(f"  • {h.name}  —  {h.project_root}  ({h.chunk_count()} chunks)")
+    return "\n".join(lines)
 
 
 @mcp.tool()
-def search_code(query: str, top_k: int = 5) -> str:
+def search_code(query: str, top_k: int = 5, project: str | None = None) -> str:
     """
     Semantic search across the indexed codebase.
     Returns function/class signatures and file locations.
@@ -111,11 +126,18 @@ def search_code(query: str, top_k: int = 5) -> str:
         query: Natural language description of what you're looking for.
                Examples: "JWT token validation", "database connection pool", "error handler"
         top_k: Number of results (default 5, max 10)
+        project: Which indexed project to search. Optional when only one project
+                 is indexed; required when several are. Call list_projects() to
+                 see the available names.
 
     Returns signatures only — call get_code() if you need the full implementation.
     """
-    store = _require_store()
-    embedder = _require_embedder()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    store = proj.store
+    embedder = _require_registry().embedder
 
     top_k = min(top_k, 10)
     fetch_k = min(top_k * 3, 30)  # over-fetch from each source before merging
@@ -123,8 +145,9 @@ def search_code(query: str, top_k: int = 5) -> str:
     embedding = embedder.embed_one(query)
     semantic = store.search(embedding, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
 
-    if _bm25:
-        bm25_results = _bm25.search(query, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
+    bm25 = proj.bm25
+    if bm25:
+        bm25_results = bm25.search(query, top_k=fetch_k, chunk_types=_CODE_CHUNK_TYPES)
         # Only mix BM25 when it has confident hits — strong score means the query
         # contains exact symbol names or specific keywords. Low scores mean the
         # query is broad natural language where BM25 just adds noise.
@@ -161,7 +184,7 @@ def search_code(query: str, top_k: int = 5) -> str:
 
 
 @mcp.tool()
-def get_code(symbol_name: str) -> str:
+def get_code(symbol_name: str, project: str | None = None) -> str:
     """
     Get the full source of a specific function, class, or method by name.
     Only call this after search_code() identified the symbol you need.
@@ -170,8 +193,14 @@ def get_code(symbol_name: str) -> str:
 
     Args:
         symbol_name: Exact name of the function or class (e.g. "validateToken")
+        project: Which indexed project to read from. Optional when only one
+                 project is indexed. Call list_projects() for the names.
     """
-    store = _require_store()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    store = proj.store
 
     results = store.get_by_name(symbol_name)
     if not results:
@@ -193,20 +222,27 @@ def get_code(symbol_name: str) -> str:
 
 
 @mcp.tool()
-def repo_map() -> str:
+def repo_map(project: str | None = None) -> str:
     """
     Returns a compressed map of the entire codebase.
     Shows file structure and exported symbols — no source code.
     Use this at the start of a session to understand the architecture.
     Token cost: ~400-800 tokens for a medium project.
+
+    Args:
+        project: Which indexed project to map. Optional when only one project
+                 is indexed. Call list_projects() for the names.
     """
-    store = _require_store()
-    all_metadata = store.get_all_metadata()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    all_metadata = proj.store.get_all_metadata()
     return generate_repo_map(all_metadata)
 
 
 @mcp.tool()
-def find_usages(symbol_name: str) -> str:
+def find_usages(symbol_name: str, project: str | None = None) -> str:
     """
     Find every place a function, class, or variable is referenced —
     call sites, imports, type annotations, and re-exports.
@@ -217,22 +253,29 @@ def find_usages(symbol_name: str) -> str:
 
     Args:
         symbol_name: Exact name of the function or class (e.g. "validateToken")
+        project: Which indexed project to search. Optional when only one project
+                 is indexed. Call list_projects() for the names.
     """
     from ..utils.grep import grep_symbol, is_definition_line
 
-    store = _require_store()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    store = proj.store
+    project_root = proj.project_root
 
     # ── 1. Grep: exact word-boundary + dynamic string-literal search ─────────
-    if _project_root:
+    if project_root:
         from ..utils.grep import grep_symbol_dynamic
 
-        matches = grep_symbol(symbol_name, _project_root, max_results=30)
+        matches = grep_symbol(symbol_name, project_root, max_results=30)
         usages = [
             m for m in matches
             if not is_definition_line(m["context"], symbol_name)
         ]
         # Also search for string-literal usage: obj["symbol"] / getattr(obj, "symbol")
-        dynamic = grep_symbol_dynamic(symbol_name, _project_root, max_results=20)
+        dynamic = grep_symbol_dynamic(symbol_name, project_root, max_results=20)
         seen_keys: set[tuple] = {(u["file"], u["line"]) for u in usages}
         for d in dynamic:
             if (d["file"], d["line"]) not in seen_keys:
@@ -263,7 +306,7 @@ def find_usages(symbol_name: str) -> str:
 
     # ── 3. Last resort: semantic similarity ───────────────────────────────────
     if not usages:
-        embedder = _require_embedder()
+        embedder = _require_registry().embedder
         embedding = embedder.embed_one(f"calls uses imports {symbol_name}")
         sem_results = store.search(embedding, top_k=10)
         sem_usages = [
@@ -311,6 +354,7 @@ def impact_analysis(
     symbol_name: str,
     depth: int = 2,
     file_path: str | None = None,
+    project: str | None = None,
 ) -> str:
     """
     Show what a function calls (callees) and what calls it (callers), up to
@@ -323,8 +367,14 @@ def impact_analysis(
         file_path: Narrow to a specific file when multiple files define the
                    same symbol name (e.g. "src/auth/jwt.ts"). Affects which
                    implementation's callees are shown.
+        project: Which indexed project to analyze. Optional when only one
+                 project is indexed. Call list_projects() for the names.
     """
-    store = _require_store()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    store = proj.store
     depth = max(1, min(depth, 3))
 
     header = f"Impact analysis for '{symbol_name}'"
@@ -411,15 +461,21 @@ def impact_analysis(
 
 
 @mcp.tool()
-def explain_file(file_path: str) -> str:
+def explain_file(file_path: str, project: str | None = None) -> str:
     """
     Returns a summary of a file: its purpose, exports, and key dependencies.
     Does NOT return the full source — use get_code() for that.
 
     Args:
         file_path: Relative path from project root (e.g. "src/auth/jwt.ts")
+        project: Which indexed project the file belongs to. Optional when only
+                 one project is indexed. Call list_projects() for the names.
     """
-    store = _require_store()
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    store = proj.store
     all_meta = store.get_all_metadata()
     file_chunks = [m for m in all_meta if m["file"] == file_path]
 

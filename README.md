@@ -61,6 +61,7 @@ Full docs live in [`docs/`](docs/README.md):
 |---|---|
 | [Installation](docs/installation.md) | Requirements and install from source |
 | [Claude Code setup](docs/claude-code.md) · [Codex setup](docs/codex.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
+| [Working with multiple projects](docs/multi-project.md) | Serve many repos from one registration |
 | [CLI reference](docs/cli-reference.md) | Every `sema` command |
 | [MCP tools](docs/mcp-tools.md) | The tools your AI assistant calls |
 | [Supported languages](docs/languages.md) | AST-aware vs text-aware indexing |

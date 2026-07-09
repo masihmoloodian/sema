@@ -118,7 +118,17 @@ def _find_claude_bin() -> str | None:
     return None
 
 
-def _claude_mcp_add(project_root: Path, scope: str = "user") -> bool:
+def _serve_args(project_root: Path | None, roots: list[Path] | None) -> list[str]:
+    """Build the `serve ...` argv for a registration command."""
+    if roots:
+        args = ["serve"]
+        for r in roots:
+            args += ["--root", str(r)]
+        return args
+    return ["serve", "--project", str(project_root)]
+
+
+def _claude_mcp_add(project_root: Path | None = None, roots: list[Path] | None = None, scope: str = "user") -> bool:
     """Register sema via `claude mcp add`. Returns True on success."""
     import subprocess, sys
     sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
@@ -127,7 +137,7 @@ def _claude_mcp_add(project_root: Path, scope: str = "user") -> bool:
         return False
     result = subprocess.run(
         [claude_bin, "mcp", "add", "sema", "-s", scope,
-         "--", sema_bin, "serve", "--project", str(project_root)],
+         "--", sema_bin, *_serve_args(project_root, roots)],
         capture_output=True, text=True,
     )
     # Exit 1 with "already exists" is fine — server is registered
@@ -149,22 +159,24 @@ def _claude_mcp_remove(scope: str = "user") -> bool:
     return result.returncode == 0
 
 
-def _codex_config_add(project_root: Path) -> tuple[bool, Path]:
+def _codex_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
     """Write [mcp_servers.sema] into <project>/.codex/config.toml. Returns (changed, config_path).
 
     Uses project-level config (not ~/.codex/config.toml) so the hardcoded project
     path is correct — Codex does not support {workspace_folder} template substitution.
+    In multi-project mode (roots given) the block serves every project under the roots.
     """
     import sys
     sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
     config_path = project_root / ".codex" / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
+    args_toml = ", ".join(f'"{a}"' for a in _serve_args(project_root, roots))
     block = (
         "\n[mcp_servers.sema]\n"
         "enabled = true\n"
         f'command = "{sema_bin}"\n'
-        f'args = ["serve", "--project", "{project_root}"]\n'
+        f"args = [{args_toml}]\n"
         "startup_timeout_sec = 15.0\n"
         "tool_timeout_sec = 60.0\n"
     )
@@ -201,19 +213,37 @@ def _codex_config_remove(config_path: Path) -> bool:
 @click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code / Codex")
 @click.option("--codex", "target", flag_value="codex", help="Register with OpenAI Codex")
 @click.option("--claude", "target", flag_value="claude", default=True, help="Register with Claude Code (default)")
-def init(uninstall: bool, target: str):
-    """Register sema as an MCP server with Claude Code or OpenAI Codex."""
-    import subprocess
+@click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
+              help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
+def init(uninstall: bool, target: str, roots: tuple[str, ...]):
+    """Register sema as an MCP server with Claude Code or OpenAI Codex.
+
+    Single-project by default (the current directory). Pass one or more --root
+    directories to serve every indexed project found beneath them at once.
+    """
     project_root = Path(".").resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
+    root_paths = [Path(r).resolve() for r in roots]
 
     if target == "codex":
-        _init_codex(uninstall, project_root, index_path)
+        _init_codex(uninstall, project_root, index_path, root_paths)
     else:
-        _init_claude(uninstall, project_root, index_path)
+        _init_claude(uninstall, project_root, index_path, root_paths)
 
 
-def _init_claude(uninstall: bool, project_root: Path, index_path: Path) -> None:
+def _report_discovered(roots: list[Path]) -> None:
+    """Print how many indexed projects the given roots currently cover."""
+    from .mcp.registry import discover_projects
+    discovered = discover_projects(roots)
+    if discovered:
+        console.print(f"[dim]  Found {len(discovered)} indexed project(s) under the root(s):[/dim]")
+        for pr, _ip in discovered:
+            console.print(f"[dim]    • {pr}[/dim]")
+    else:
+        console.print("[yellow]  No indexed projects found yet — run [bold]sema index .[/bold] inside each project.[/yellow]")
+
+
+def _init_claude(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
     import subprocess
     if uninstall:
         ok = _claude_mcp_remove(scope="user")
@@ -223,8 +253,9 @@ def _init_claude(uninstall: bool, project_root: Path, index_path: Path) -> None:
             console.print("[red]✗[/red] Could not remove via 'claude mcp remove'. Is the claude CLI installed?")
 
         try:
+            # Match both single-project and multi-project (--root) serve processes.
             result = subprocess.run(
-                ["pgrep", "-f", f"sema serve --project {project_root}"],
+                ["pgrep", "-f", "sema serve"],
                 capture_output=True, text=True,
             )
             pids = result.stdout.split()
@@ -235,20 +266,26 @@ def _init_claude(uninstall: bool, project_root: Path, index_path: Path) -> None:
             pass
         return
 
-    if not index_path.exists():
+    if roots:
+        _report_discovered(roots)
+    elif not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
-    ok = _claude_mcp_add(project_root, scope="user")
+    ok = _claude_mcp_add(project_root=project_root, roots=roots or None, scope="user")
     if ok:
-        console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope)")
+        if roots:
+            console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope, multi-project)")
+        else:
+            console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope)")
         console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Claude Code to confirm.")
     else:
+        manual = " ".join(_serve_args(project_root, roots or None))
         console.print("[red]✗[/red] Could not register via 'claude mcp add'. Is the claude CLI installed?")
-        console.print(f"\nRun manually:\n  claude mcp add sema -s user -- sema serve --project {project_root}")
+        console.print(f"\nRun manually:\n  claude mcp add sema -s user -- sema {manual}")
 
 
-def _init_codex(uninstall: bool, project_root: Path, index_path: Path) -> None:
+def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
     config_path = project_root / ".codex" / "config.toml"
     if uninstall:
         removed = _codex_config_remove(config_path)
@@ -258,13 +295,16 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path) -> None:
             console.print(f"[yellow]–[/yellow] \\[mcp_servers.sema] not found in {config_path}")
         return
 
-    if not index_path.exists():
+    if roots:
+        _report_discovered(roots)
+    elif not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
-    changed, config_path = _codex_config_add(project_root)
+    changed, config_path = _codex_config_add(project_root, roots=roots or None)
     if changed:
-        console.print(f"[green]✔[/green] Registered as MCP server 'sema' (project scope)")
+        mode = "project scope, multi-project" if roots else "project scope"
+        console.print(f"[green]✔[/green] Registered as MCP server 'sema' ({mode})")
         console.print(f"[dim]  {config_path}[/dim]")
     else:
         console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
@@ -387,6 +427,22 @@ def status(verbose: bool):
             console.print(f"  [dim]     serving: {serving}[/dim]")
             console.print(f"  [dim]     Fix: {fix_cmd}[/dim]")
 
+    def _print_serving_roots(roots: list[str], project_root: Path) -> None:
+        """Multi-project mode: list the served roots and the projects discovered under them."""
+        from .mcp.registry import discover_projects
+        console.print(f"  Serving      [green]multi-project[/green] ({len(roots)} root(s))")
+        for r in roots:
+            console.print(f"  [dim]     root: {r}[/dim]")
+        discovered = discover_projects([Path(r) for r in roots])
+        console.print(f"  Projects     {len(discovered)} indexed")
+        cwd_served = any(Path(r).resolve() == project_root or
+                         project_root.is_relative_to(Path(r).resolve()) for r in roots)
+        for pr, _ip in discovered:
+            here = " [green](cwd)[/green]" if pr == project_root else ""
+            console.print(f"  [dim]     • {pr}[/dim]{here}")
+        if not cwd_served:
+            console.print(f"  [yellow]  ⚠  Current directory is not under any served root[/yellow]")
+
     console.print()
     console.print(f"[bold]MCP server[/bold]")
 
@@ -399,7 +455,8 @@ def status(verbose: bool):
             for line in output.splitlines():
                 if "sema" in line and ":" in line:
                     serving = None
-                    if "--project" in line:
+                    served_roots = _re.findall(r"--root\s+(\S+)", line)
+                    if not served_roots and "--project" in line:
                         parts = line.split("--project")
                         if len(parts) > 1:
                             serving = parts[1].strip().split()[0]
@@ -412,7 +469,10 @@ def status(verbose: bool):
                     else:
                         console.print(f"  Claude Code  [yellow]⚠ Registered (not connected)[/yellow]")
 
-                    _print_serving(serving, project_root, "sema init --claude --uninstall && sema init --claude")
+                    if served_roots:
+                        _print_serving_roots(served_roots, project_root)
+                    else:
+                        _print_serving(serving, project_root, "sema init --claude --uninstall && sema init --claude")
 
                     if verbose:
                         claude_cfg = Path.home() / ".claude.json"
@@ -429,9 +489,11 @@ def status(verbose: bool):
         content = codex_config.read_text()
         if "[mcp_servers.sema]" in content:
             serving = None
-            m = _re.search(r'"--project",\s*"([^"]+)"', content)
-            if m:
-                serving = m.group(1)
+            served_roots = _re.findall(r'"--root",\s*"([^"]+)"', content)
+            if not served_roots:
+                m = _re.search(r'"--project",\s*"([^"]+)"', content)
+                if m:
+                    serving = m.group(1)
 
             # Check if binary in config exists
             cmd_ok = True
@@ -445,7 +507,10 @@ def status(verbose: bool):
             if cmd_ok:
                 console.print(f"  Codex        [green]✔ Connected[/green]")
 
-            _print_serving(serving, project_root, "sema init --codex --uninstall && sema init --codex")
+            if served_roots:
+                _print_serving_roots(served_roots, project_root)
+            else:
+                _print_serving(serving, project_root, "sema init --codex --uninstall && sema init --codex")
 
             if verbose:
                 console.print(f"  [dim]  config:  {codex_config}[/dim]")
@@ -526,13 +591,23 @@ def watch(path: str, workspace: str | None):
 
 
 @main.command()
-@click.option("--project", default=".", type=click.Path(exists=True))
-def serve(project: str):
-    """Start MCP server (called automatically by Claude Code via mcp.json)."""
-    from .mcp.server import serve as _serve
-    project_root = Path(project).resolve()
-    index_path = project_root / DEFAULT_INDEX_DIR
-    _serve(project_root, index_path)
+@click.option("--project", default=None, type=click.Path(exists=True),
+              help="Serve a single project (default: current directory).")
+@click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
+              help="Serve every indexed project found under this directory (repeatable). Enables multi-project mode.")
+def serve(project: str | None, roots: tuple[str, ...]):
+    """Start MCP server (called automatically by Claude Code / Codex).
+
+    Single-project mode with --project (or the current directory), or
+    multi-project mode with one or more --root directories.
+    """
+    from .mcp.server import serve as _serve, serve_roots as _serve_roots
+    if roots:
+        _serve_roots([Path(r).resolve() for r in roots])
+    else:
+        project_root = Path(project or ".").resolve()
+        index_path = project_root / DEFAULT_INDEX_DIR
+        _serve(project_root, index_path)
 
 
 @main.command()

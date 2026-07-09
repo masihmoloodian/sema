@@ -27,7 +27,7 @@ Known limitations in the current version (v0.1.x):
 - **AST-aware parsers for TypeScript, Python, Go only** — Ruby, Rust, Java, C#, and others fall back to generic text chunking (searchable, but no symbol-level granularity)
 - **Call graph is name-based** — calls are matched by symbol name, not by resolved reference; two functions with the same name in different files are indistinguishable to the graph
 - **`find_usages` is approximate** — uses semantic similarity, not AST-level reference tracking; may miss some call sites
-- **Single project per server** — one `sema serve` process serves one project root
+- **Multi-project is discovery-based** — one server can serve many projects via `sema init --root <dir>` ([details](multi-project.md)), but projects must live under a scanned root and each keeps a separate index (no cross-project symbol search yet)
 - **Model fixed at index time** — changing the embedding model requires a full re-index
 - **Tested on macOS only** — Apple Silicon M4 Pro, macOS 26.4; Linux likely works; Windows untested
 

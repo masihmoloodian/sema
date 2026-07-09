@@ -21,7 +21,7 @@
 - All of these already produce text-level chunks today; these upgrades add symbol granularity
 
 ## v0.5 — Multi-project & monorepo
-- [ ] Single `sema serve` handles multiple project roots
+- [x] Single `sema serve` handles multiple project roots (`sema init --root <dir>`, auto-discovery, per-tool `project` argument)
 - [x] Workspace-level index for monorepos (`--workspace` flag)
 - [ ] Cross-project symbol search
 
