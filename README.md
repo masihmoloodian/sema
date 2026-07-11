@@ -24,7 +24,7 @@ and
 - **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
-- **🧩 VS Code extension** — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor. [Learn more →](vscode-extension/README.md)
+- **🧩 VS Code extension — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor.** [Learn more →](vscode-extension/README.md)
 
 ## Why sema
 
