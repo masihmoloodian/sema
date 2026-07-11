@@ -6,9 +6,9 @@
 
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](docs/faq.md#disclaimer).
 
-**Stop wasting tokens on file navigation. Speed up Claude Code and OpenAI Codex on large codebases.**
+**Stop wasting tokens — on navigating your codebase, and on rewriting code that already exists. Speed up Claude Code and OpenAI Codex on large codebases.**
 
-Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never has to read files blindly again.
+Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never reads files blindly again, plus a reuse guard so it stops reinventing helpers you already have.
 
 Works with
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
@@ -17,11 +17,21 @@ Works with
 and
 <a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
 
+## Features
+
+- **🔍 Semantic search** — `search_code()` finds code by meaning and returns signatures only (~150 tokens), never whole files.
+- **♻️ Reuse guard** — `check_reuse()` tells your assistant whether a function already exists *before* it writes a new one, so it reuses instead of reinventing. **98% reuse-vs-build accuracy** in a 50-example eval on real code.
+- **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
+- **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
+- **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
+
 ## Why sema
 
 Every Claude Code and Codex session starts cold. On a large project, your AI assistant burns 10,000–25,000 tokens just *navigating* — running `find`, reading full files, building a mental model from scratch — before it can help with anything.
 
 Sema gives it a search index instead. Instead of reading a dozen files to answer *"how does auth work?"*, the AI runs one `search_code()` and fetches only the exact function bodies it needs — typically **4–11× fewer tokens**. Index once. Your AI searches forever.
+
+That's the *reading* half of the token bill. Sema goes after the *writing* half too: before your assistant adds a new helper, `check_reuse()` searches the index for an existing one and answers **reuse / review / safe-to-build** — so it extends what's already there instead of shipping a fourth function that does the same thing.
 
 See the [benchmarks](docs/benchmarks.md) for measured token savings on real open-source repos.
 
@@ -51,7 +61,7 @@ Requires Python 3.11+. No Docker, no external APIs, no GPU — everything runs o
 
 `sema index .` uses tree-sitter to parse every function, class, and method, embeds each one locally with SBERT (`all-MiniLM-L6-v2`), and stores the vectors plus full source in an embedded ChromaDB. A local MCP server then exposes search tools to Claude/Codex over stdio. `search_code()` returns signatures only; `get_code()` returns full bodies on demand.
 
-It also closes the loop on the other side of the token bill: [`check_reuse()`](docs/mcp-tools.md#check_reuse--dont-rewrite-what-already-exists) tells the AI whether a helper already exists *before* it writes a new one — so it reuses instead of reinventing. And one registration can [serve many projects at once](docs/multi-project.md).
+The same index powers the rest of the toolset: [`check_reuse()`](docs/mcp-tools.md#check_reuse--dont-rewrite-what-already-exists) (*does this already exist?*), [`impact_analysis()`](docs/mcp-tools.md#impact_analysis--call-graph) (call graph and blast radius), and [multi-project serving](docs/multi-project.md) — all fully offline.
 
 See [Architecture](docs/architecture.md) for the full picture.
 
