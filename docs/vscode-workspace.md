@@ -40,13 +40,14 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 | Goal | Tool |
 |---|---|
 | Find a function, class, or method | `search_code("natural language description")` |
+| Check if something already exists before writing it | `check_reuse("what you're about to build")` |
 | Read the full body of a known symbol | `get_code("exactSymbolName")` |
 | Find where a symbol is called or referenced | `find_usages("symbolName")` |
 | Understand what a file exports | `explain_file("path/to/file.ts")` |
 | Understand the overall architecture | `repo_map()` |
 | See what a function calls and what calls it | `impact_analysis("symbolName")` |
 
-**Always call `search_code()` before using Bash find/grep or Read to explore. Before changing a function, call `impact_analysis()` to understand the blast radius.**
+**Always call `search_code()` before using Bash find/grep or Read to explore. Call `check_reuse()` before writing a new utility and reuse any existing match. Before changing a function, call `impact_analysis()` to understand the blast radius.**
 EOF
 done
 ```

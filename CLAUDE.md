@@ -9,14 +9,17 @@ Claude then calls search_code() instead of reading files blindly.
 sema/
   indexer/      tree-sitter parsing + SBERT embedding
   store/        ChromaDB wrapper + Chunk schema
-  mcp/          MCP server + 5 tools
-  cli.py        Click CLI: index, init, serve, search, status
+  mcp/          MCP server + 8 tools + multi-project registry
+  reuse.py      reuse guard — "does this already exist?" verdict engine
+  cli.py        Click CLI: index, init, serve, search, reuse, status
   utils/        file_walker, gitignore, repo_map generator
 
 ## Key files to read first
 - sema/store/schema.py      Chunk dataclass — the core data model
 - sema/store/chroma.py      ChromaDB wrapper — how data is stored/queried
-- sema/mcp/tools.py         All 5 MCP tools — the user-facing API
+- sema/mcp/tools.py         All 8 MCP tools — the user-facing API
+- sema/mcp/registry.py      Multi-project registry (serve many projects at once)
+- sema/reuse.py             Reuse guard engine (check_reuse tool + `sema reuse`)
 - sema/indexer/parser.py    Language dispatcher
 - tests/fixtures/example-repo/  Test data
 
@@ -38,4 +41,6 @@ uv run ruff check sema/                       lint
 
 ## Current status
 Phase 1 complete. Phase 2 in progress.
-All 5 MCP tools are implemented.
+8 MCP tools implemented: search_code, check_reuse, get_code, repo_map,
+find_usages, explain_file, impact_analysis, list_projects.
+Multi-project serving (`sema init --root`) and the reuse guard are live.

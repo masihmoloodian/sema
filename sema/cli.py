@@ -367,6 +367,54 @@ def search(query: str, top_k: int, all_types: bool):
 
 
 @main.command()
+@click.argument("description")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project to check (default: current directory)")
+def reuse(description: str, project: str):
+    """Check whether functionality already exists before building it.
+
+    Grounds the "reuse before you write" principle in the index: describe what
+    you're about to build and sema tells you to reuse, review, or safely build.
+    """
+    from .store.chroma import SemaStore
+    from .indexer.embedder import Embedder
+    from .reuse import assess_reuse, ReuseVerdict
+
+    project_root = Path(project).resolve()
+    index_path = project_root / DEFAULT_INDEX_DIR
+    if not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    store = SemaStore(index_path)
+    embedder = Embedder()
+    result = assess_reuse(store, embedder, description)
+
+    color = {
+        ReuseVerdict.EXISTS: "red",
+        ReuseVerdict.RELATED: "yellow",
+        ReuseVerdict.NOVEL: "green",
+    }[result.verdict]
+    label = {
+        ReuseVerdict.EXISTS: "ALREADY EXISTS — reuse or extend",
+        ReuseVerdict.RELATED: "RELATED code exists — review first",
+        ReuseVerdict.NOVEL: "NOVEL — safe to build",
+    }[result.verdict]
+
+    console.print()
+    console.print(f"[bold]{description}[/bold]")
+    console.print(f"  Verdict  [{color}]{label}[/{color}]  [dim](top {int(round(result.top_score*100))}%)[/dim]\n")
+    for h in result.candidates:
+        console.print(
+            f"  [cyan]{h['file']}::{h['name']}[/cyan]  "
+            f"[dim]line {h['start_line']}[/dim]  "
+            f"[green]{int(round(h['score']*100))}% match[/green]"
+        )
+        console.print(f"    [dim]{h['type']}:[/dim] {h['signature']}")
+    if not result.candidates:
+        console.print("  [dim]No existing implementation found — prefer stdlib/existing deps, keep it minimal.[/dim]")
+
+
+@main.command()
 @click.option("--verbose", "-v", is_flag=True, help="Show full details including MCP registration and binary paths.")
 def status(verbose: bool):
     """Show index stats and MCP registration status."""

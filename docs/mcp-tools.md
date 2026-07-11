@@ -6,6 +6,7 @@ These are the tools your AI assistant calls during a session. You never call the
 |---|---|---|---|
 | `list_projects()` | — | Indexed projects this server serves, with names + chunk counts | ~50–150 |
 | `search_code(query)` | Natural language | Matching function/class signatures + file locations | ~100–200 |
+| `check_reuse(description)` | Natural language | Verdict — reuse existing code, review related, or safely build new | ~50–300 |
 | `get_code(symbol)` | Exact symbol name | Full source body — all implementations if name appears in multiple files | ~200–500 |
 | `repo_map()` | — | Compressed architecture overview: files + exported symbols | ~400–800 |
 | `find_usages(symbol)` | Symbol name | Call sites and references (signatures only) | ~150–300 |
@@ -15,6 +16,31 @@ These are the tools your AI assistant calls during a session. You never call the
 ### The `project` argument
 
 Every tool except `list_projects()` accepts an optional `project` argument. It only matters in [multi-project mode](multi-project.md): when the server serves more than one indexed project, pass `project="<name>"` (from `list_projects()`) to pick which one to query. With a single indexed project the argument is optional and ignored.
+
+## `check_reuse` — don't rewrite what already exists
+
+`check_reuse` answers one question before you write code: *does this already exist in the codebase?* Pass a plain-language description of what you're about to build and it returns a **grounded verdict**, not just a list:
+
+- **⚠ Already exists** (strong match) — reuse or extend the listed symbol instead of writing new code.
+- **Related code exists** — review the candidates before building.
+- **✅ Safe to build** — nothing close was found; write the minimum that works.
+
+```
+check_reuse("generate a JWT for a user")
+
+⚠ This likely ALREADY EXISTS — reuse or extend it instead of writing new code (top match 71%):
+
+  src/auth/jwt.ts::generateToken  [line 6]  (71% match)
+    function: generateToken(userId: string): string
+  ...
+→ If one of these fits, call get_code("<name>") to read it, then reuse or extend it.
+```
+
+This is the sema-native take on "reuse before you build": a prompt rule can *tell* an agent to check for duplicates, but only the index can actually answer. The verdict closes the loop — "checked: reuse this" or "checked: nothing exists, safe to build" — so the agent stops reinventing helpers that already live in the repo.
+
+**Measured accuracy.** On a 50-example evaluation over sema's *own* source (25 descriptions of things that exist, 25 that don't, including semantically adjacent decoys), `check_reuse` classifies reuse-vs-build with **F1 = 0.98 / 98% accuracy** (recall 1.0 — it never misses an existing implementation). The two naive strategies an ungrounded agent would use score far lower: "trust the top search hit" gets F1 0.67 (it flags everything as existing), and "just build it" gets F1 0.0 (it never reuses). Thresholds are calibrated on both the fixture and real code; see `tests/test_reuse.py`.
+
+You can try it from the terminal too: `sema reuse "retry an http request with backoff"`.
 
 ## `impact_analysis` — call graph
 

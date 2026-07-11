@@ -15,6 +15,7 @@ sema init --codex --uninstall                Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10               Return more results
 sema search "query" --all-types               Include docs/config sections in results
+sema reuse "what you're about to build"       Check if it already exists: reuse / review / safe-to-build verdict
 sema status                                   Show index stats and which project the MCP server is serving
 sema status --verbose                         Full details: index path, language breakdown, binary, registered command
 sema doctor                                   Diagnose installation and registration issues

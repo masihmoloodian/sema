@@ -13,24 +13,8 @@ from sema.mcp.registry import (
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "example-repo"
 
 
-def _index_into(index_path: Path, embedder):
-    from sema.store.chroma import SemaStore
-    from sema.indexer.chunker import index_project
-
-    index_path.mkdir(parents=True, exist_ok=True)
-    store = SemaStore(index_path)
-    index_project(FIXTURE_REPO, store, embedder)
-    return store
-
-
-@pytest.fixture(scope="session")
-def multi_root(tmp_path_factory, embedder):
-    """A directory holding two indexed projects and one un-indexed folder."""
-    root = tmp_path_factory.mktemp("multi")
-    for name in ("proj-a", "proj-b"):
-        _index_into(root / name / ".sema" / "index", embedder)
-    (root / "not-a-project").mkdir()  # no .sema/index — must be ignored
-    return root
+# The `multi_root` fixture (two indexed projects + one un-indexed folder) is
+# defined in conftest.py so the reuse-guard tests can share it.
 
 
 # ── discovery ────────────────────────────────────────────────────────────────

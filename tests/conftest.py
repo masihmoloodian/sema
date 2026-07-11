@@ -35,3 +35,21 @@ def indexed_store(tmp_path_factory):
     embedder = Embedder()
     index_project(FIXTURE_REPO, store, embedder)
     return store, embedder
+
+
+@pytest.fixture(scope="session")
+def multi_root(tmp_path_factory, embedder):
+    """A directory holding two indexed projects and one un-indexed folder.
+
+    Shared by the multi-project (registry) and reuse-guard tool tests.
+    """
+    from sema.store.chroma import SemaStore
+    from sema.indexer.chunker import index_project
+
+    root = tmp_path_factory.mktemp("multi")
+    for name in ("proj-a", "proj-b"):
+        index_path = root / name / ".sema" / "index"
+        index_path.mkdir(parents=True, exist_ok=True)
+        index_project(FIXTURE_REPO, SemaStore(index_path), embedder)
+    (root / "not-a-project").mkdir()  # no .sema/index — must be ignored
+    return root

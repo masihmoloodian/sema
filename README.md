@@ -51,6 +51,8 @@ Requires Python 3.11+. No Docker, no external APIs, no GPU — everything runs o
 
 `sema index .` uses tree-sitter to parse every function, class, and method, embeds each one locally with SBERT (`all-MiniLM-L6-v2`), and stores the vectors plus full source in an embedded ChromaDB. A local MCP server then exposes search tools to Claude/Codex over stdio. `search_code()` returns signatures only; `get_code()` returns full bodies on demand.
 
+It also closes the loop on the other side of the token bill: [`check_reuse()`](docs/mcp-tools.md#check_reuse--dont-rewrite-what-already-exists) tells the AI whether a helper already exists *before* it writes a new one — so it reuses instead of reinventing. And one registration can [serve many projects at once](docs/multi-project.md).
+
 See [Architecture](docs/architecture.md) for the full picture.
 
 ## Documentation

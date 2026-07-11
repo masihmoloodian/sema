@@ -31,12 +31,13 @@ This project is indexed by sema. Use sema MCP tools to locate code — do not us
 | Goal | Tool |
 |---|---|
 | Find a function, class, or method | `search_code("natural language description")` |
+| Check if something already exists before writing it | `check_reuse("what you're about to build")` |
 | Read full source of a known symbol | `get_code("symbolName")` |
 | Find all callers of a symbol | `find_usages("symbolName")` |
 | Understand call chains and blast radius | `impact_analysis("symbolName")` |
 | Architecture overview | `repo_map()` |
 
-Always call `search_code()` before using grep or reading files directly.
+Always call `search_code()` before using grep or reading files directly. Before writing a new function or utility, call `check_reuse()` and reuse an existing match instead of writing a parallel implementation.
 ```
 
 ## Multiple projects

@@ -29,6 +29,7 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 | Goal | Tool |
 |---|---|
 | Find a function, class, or method | `search_code("natural language description")` |
+| Check if something already exists before writing it | `check_reuse("what you're about to build")` |
 | Read the full body of a known symbol | `get_code("exactSymbolName")` |
 | Find all callers of a symbol | `find_usages("symbolName")` |
 | Understand the overall architecture | `repo_map()` |
@@ -37,8 +38,9 @@ This project is indexed by sema. Use sema tools to locate code before reading fi
 **Rules:**
 1. Always call `search_code()` before using Bash find/grep or Read to explore.
 2. If `search_code()` returns relevant results, use `get_code()` for the full body — do not Read the whole file.
-3. Before changing a function, call `impact_analysis()` to understand the blast radius.
-4. If sema returns no results, fall back to normal file navigation — the index may be stale.
+3. Before writing a new function or utility, call `check_reuse()`. If it finds an existing match, reuse or extend it instead of writing a parallel implementation.
+4. Before changing a function, call `impact_analysis()` to understand the blast radius.
+5. If sema returns no results, fall back to normal file navigation — the index may be stale.
 ```
 
 ## Keep the index fresh (optional)

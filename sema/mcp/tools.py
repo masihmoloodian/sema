@@ -184,6 +184,33 @@ def search_code(query: str, top_k: int = 5, project: str | None = None) -> str:
 
 
 @mcp.tool()
+def check_reuse(description: str, project: str | None = None) -> str:
+    """
+    Before writing new code, check whether it already exists in the codebase.
+
+    Call this the moment you are about to implement a function, helper, or
+    utility: pass a short description of the behavior you need. Returns a
+    grounded verdict — reuse an existing implementation, review related code,
+    or (when nothing matches) safely build it minimally. Prefer this over
+    writing a parallel implementation of something that may already exist.
+
+    Args:
+        description: What you're about to build, in plain language
+                     (e.g. "generate a JWT for a user", "retry an http request").
+        project: Which indexed project to check. Optional when only one project
+                 is indexed. Call list_projects() for the names.
+    """
+    from ..reuse import assess_reuse, format_reuse
+
+    try:
+        proj = _resolve(project)
+    except ProjectResolutionError as e:
+        return str(e)
+    result = assess_reuse(proj.store, _require_registry().embedder, description)
+    return format_reuse(result, description)
+
+
+@mcp.tool()
 def get_code(symbol_name: str, project: str | None = None) -> str:
     """
     Get the full source of a specific function, class, or method by name.
