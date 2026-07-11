@@ -1,0 +1,13 @@
+.vscode/**
+.sema/**
+.codex/**
+src/**
+node_modules/**
+esbuild.js
+tsconfig.json
+.gitignore
+package-lock.json
+*.vsix
+**/*.ts
+out/**
+!out/extension.js

@@ -1,0 +1,172 @@
+{
+  "name": "sema-vscode",
+  "displayName": "sema — semantic code search & chat",
+  "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude + OpenAI), powered by the local sema index.",
+  "version": "0.1.0",
+  "publisher": "masihmoloodian",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Chat"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/masihmoloodian/sema"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:semaChat",
+    "onView:semaManage"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sema",
+          "title": "sema",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sema": [
+        {
+          "type": "webview",
+          "id": "semaChat",
+          "name": "Chat",
+          "icon": "media/icon.svg",
+          "contextualTitle": "sema"
+        },
+        {
+          "id": "semaManage",
+          "name": "Manage",
+          "icon": "media/icon.svg",
+          "contextualTitle": "sema"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "sema.search",
+        "title": "sema: Search code",
+        "icon": "$(search)"
+      },
+      {
+        "command": "sema.reuse",
+        "title": "sema: Check reuse",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "sema.chat.setKey",
+        "title": "sema: Set chat API key",
+        "icon": "$(key)"
+      },
+      {
+        "command": "sema.chat.clear",
+        "title": "sema: Clear chat",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "sema.manage.reindex",
+        "title": "sema: Re-index",
+        "icon": "$(database)"
+      },
+      {
+        "command": "sema.manage.reindexReset",
+        "title": "sema: Re-index (reset)",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "sema.manage.doctor",
+        "title": "sema: Doctor",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "sema.manage.watchToggle",
+        "title": "sema: Toggle watch (auto-index)",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "sema.manage.refresh",
+        "title": "sema: Refresh status",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "sema.chat.setKey",
+          "when": "view == semaChat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sema.chat.clear",
+          "when": "view == semaChat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sema.manage.reindex",
+          "when": "view == semaManage",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sema.manage.refresh",
+          "when": "view == semaManage",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "sema",
+      "properties": {
+        "sema.binaryPath": {
+          "type": "string",
+          "default": "sema",
+          "description": "Path to the sema executable. Use an absolute path if sema lives in a virtualenv (e.g. /path/to/sema/.venv/bin/sema)."
+        },
+        "sema.searchResultLimit": {
+          "type": "number",
+          "default": 20,
+          "description": "How many results to request from `sema search`."
+        },
+        "sema.chat.maxTokens": {
+          "type": "number",
+          "default": 8192,
+          "description": "Maximum tokens for a chat completion response (API providers)."
+        },
+        "sema.chat.claudePath": {
+          "type": "string",
+          "default": "claude",
+          "description": "Path to the Claude Code CLI (the 'Claude Code (local)' provider). Set an absolute path if `claude` isn't on VS Code's PATH."
+        },
+        "sema.chat.codexPath": {
+          "type": "string",
+          "default": "codex",
+          "description": "Path to the Codex CLI (the 'Codex (local)' provider). Set an absolute path if `codex` isn't on VS Code's PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "openai": "^6.46.0"
+  }
+}

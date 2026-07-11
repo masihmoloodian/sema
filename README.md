@@ -24,6 +24,7 @@ and
 - **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
+- **🧩 VS Code extension** — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor. [Learn more →](vscode-extension/README.md)
 
 ## Why sema
 
@@ -65,6 +66,18 @@ The same index powers the rest of the toolset: [`check_reuse()`](docs/mcp-tools.
 
 See [Architecture](docs/architecture.md) for the full picture.
 
+## sema for VS Code
+
+Prefer a UI? The **[sema VS Code extension](vscode-extension/README.md)** brings the whole toolset into the editor — plus a codebase-aware **chat panel**:
+
+- **💬 Chat with your code** through four providers — **Claude Code** and **Codex** running locally (reuse your existing login, no API key; they read the repo and, in Agent mode, edit it), or the **Anthropic** and **OpenAI** APIs with your own key.
+- **🧭 Ask / Agent modes**, a **reasoning-effort** selector, streamed thinking and tool activity, and **per-session memory** — just like the terminal apps, and prompts pass straight through (no wrapper persona).
+- **🔎 Semantic index toggle** — inject sema's retrieved context (RAG) on demand; the same `search_code` / `check_reuse` power the panel.
+- **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost** for the session.
+- **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
+
+Install it from a packaged `.vsix` — see the [extension guide](vscode-extension/README.md#installation).
+
 ## Documentation
 
 Full docs live in [`docs/`](docs/README.md):
@@ -72,6 +85,7 @@ Full docs live in [`docs/`](docs/README.md):
 | | |
 |---|---|
 | [Installation](docs/installation.md) | Requirements and install from source |
+| [sema for VS Code](vscode-extension/README.md) | sema's own VS Code extension — chat panel, search, reuse, and index management |
 | [Claude Code setup](docs/claude-code.md) · [Codex setup](docs/codex.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
 | [Working with multiple projects](docs/multi-project.md) | Serve many repos from one registration |
 | [CLI reference](docs/cli-reference.md) | Every `sema` command |

@@ -13,6 +13,11 @@ DEFAULT_INDEX_DIR = ".sema/index"
 DEFAULT_META_FILE = ".sema/meta.json"
 
 
+def _emit_json(data: object) -> None:
+    """Print a value as plain JSON on stdout (no ANSI) for editors/scripts."""
+    click.echo(json.dumps(data, indent=2, default=str))
+
+
 @click.group()
 @click.version_option()
 def main():
@@ -315,7 +320,8 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: li
 @click.argument("query")
 @click.option("--top-k", default=5, help="Number of results")
 @click.option("--all-types", is_flag=True, help="Include docs/config sections (default: code only)")
-def search(query: str, top_k: int, all_types: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output results as JSON (for editors/scripts)")
+def search(query: str, top_k: int, all_types: bool, as_json: bool):
     """Search the codebase index. Useful for testing without Claude."""
     from .store.chroma import SemaStore
     from .store.bm25 import BM25Index
@@ -326,7 +332,10 @@ def search(query: str, top_k: int, all_types: bool):
     index_path = project_root / DEFAULT_INDEX_DIR
 
     if not index_path.exists():
-        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        if as_json:
+            _emit_json({"error": "no_index", "message": "No index found. Run `sema index .` first."})
+        else:
+            console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
     store = SemaStore(index_path)
@@ -351,6 +360,23 @@ def search(query: str, top_k: int, all_types: bool):
     else:
         results = semantic[:top_k]
 
+    if as_json:
+        _emit_json({
+            "query": query,
+            "results": [
+                {
+                    "file": r["file"],
+                    "name": r["name"],
+                    "type": r["type"],
+                    "signature": r["signature"],
+                    "start_line": r["start_line"],
+                    "score": round(float(r["score"]), 4),
+                }
+                for r in results
+            ],
+        })
+        return
+
     if not results:
         console.print("No results found.")
         return
@@ -367,9 +393,60 @@ def search(query: str, top_k: int, all_types: bool):
 
 
 @main.command()
+@click.argument("symbol")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project to read from (default: current directory)")
+@click.option("--json", "as_json", is_flag=True, help="Output the source as JSON (for editors/scripts)")
+def get(symbol: str, project: str, as_json: bool):
+    """Print the full source of a function/class/method by name.
+
+    The CLI equivalent of the get_code MCP tool — returns every implementation
+    that matches `symbol` (e.g. a controller method and a service method with
+    the same name).
+    """
+    from .store.chroma import SemaStore
+
+    project_root = Path(project).resolve()
+    index_path = project_root / DEFAULT_INDEX_DIR
+    if not index_path.exists():
+        if as_json:
+            _emit_json({"error": "no_index", "message": "No index found. Run `sema index .` first."})
+        else:
+            console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    store = SemaStore(index_path)
+    results = store.get_by_name(symbol)
+
+    if as_json:
+        _emit_json({
+            "symbol": symbol,
+            "implementations": [
+                {
+                    "file": r["file"],
+                    "type": r["chunk_type"],
+                    "start_line": r["start_line"],
+                    "end_line": r["end_line"],
+                    "body": r["body"],
+                }
+                for r in results
+            ],
+        })
+        return
+
+    if not results:
+        console.print(f"[yellow]Symbol '{symbol}' not found in index.[/yellow]")
+        return
+    for r in results:
+        console.print(f"[dim]// {r['file']} ({r['chunk_type']}) — lines {r['start_line']}-{r['end_line']}[/dim]")
+        console.print(r["body"])
+        console.print()
+
+
+@main.command()
 @click.argument("description")
 @click.option("--project", default=".", type=click.Path(exists=True), help="Project to check (default: current directory)")
-def reuse(description: str, project: str):
+@click.option("--json", "as_json", is_flag=True, help="Output the verdict as JSON (for editors/scripts)")
+def reuse(description: str, project: str, as_json: bool):
     """Check whether functionality already exists before building it.
 
     Grounds the "reuse before you write" principle in the index: describe what
@@ -382,12 +459,34 @@ def reuse(description: str, project: str):
     project_root = Path(project).resolve()
     index_path = project_root / DEFAULT_INDEX_DIR
     if not index_path.exists():
-        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        if as_json:
+            _emit_json({"error": "no_index", "message": "No index found. Run `sema index .` first."})
+        else:
+            console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
 
     store = SemaStore(index_path)
     embedder = Embedder()
     result = assess_reuse(store, embedder, description)
+
+    if as_json:
+        _emit_json({
+            "description": description,
+            "verdict": result.verdict.value,
+            "top_score": round(float(result.top_score), 4),
+            "candidates": [
+                {
+                    "file": h["file"],
+                    "name": h["name"],
+                    "type": h["type"],
+                    "signature": h["signature"],
+                    "start_line": h["start_line"],
+                    "score": round(float(h["score"]), 4),
+                }
+                for h in result.candidates
+            ],
+        })
+        return
 
     color = {
         ReuseVerdict.EXISTS: "red",
@@ -414,15 +513,77 @@ def reuse(description: str, project: str):
         console.print("  [dim]No existing implementation found — prefer stdlib/existing deps, keep it minimal.[/dim]")
 
 
+def _emit_status_json(project_root: Path, meta_path: Path) -> None:
+    """Emit index + registration status as JSON. Cheap — no subprocesses."""
+    from datetime import datetime, timezone
+
+    index_path = project_root / DEFAULT_INDEX_DIR
+    index: dict = {"exists": meta_path.exists(), "project": str(project_root)}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        chunks = meta.get("chunk_count")
+        files = meta.get("file_count")
+        try:
+            from .store.chroma import SemaStore
+            all_meta = SemaStore(index_path).get_all_metadata()
+            chunks = len(all_meta)
+            files = len({m.get("file", "") for m in all_meta if m.get("file")})
+        except Exception:
+            pass
+        indexed_at = meta.get("indexed_at")
+        age_days = None
+        stale = False
+        if indexed_at:
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(indexed_at.replace("Z", "+00:00"))
+                age_days = age.days
+                stale = age.days > 7
+            except Exception:
+                pass
+        index.update({
+            "chunks": chunks,
+            "files": files,
+            "indexed_at": indexed_at,
+            "model": meta.get("model"),
+            "age_days": age_days,
+            "stale": stale,
+        })
+
+    claude_registered = False
+    claude_cfg = Path.home() / ".claude.json"
+    if claude_cfg.exists():
+        try:
+            claude_registered = "sema" in json.loads(claude_cfg.read_text()).get("mcpServers", {})
+        except Exception:
+            pass
+    codex_registered = False
+    codex_cfg = project_root / ".codex" / "config.toml"
+    if codex_cfg.exists():
+        try:
+            codex_registered = "[mcp_servers.sema]" in codex_cfg.read_text()
+        except Exception:
+            pass
+
+    _emit_json({
+        "index": index,
+        "registration": {"claude": claude_registered, "codex": codex_registered},
+    })
+
+
 @main.command()
 @click.option("--verbose", "-v", is_flag=True, help="Show full details including MCP registration and binary paths.")
-def status(verbose: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output status as JSON (for editors/scripts)")
+def status(verbose: bool, as_json: bool):
     """Show index stats and MCP registration status."""
     import subprocess
     import shutil as _shutil
 
     project_root = Path(".").resolve()
     meta_path = project_root / DEFAULT_META_FILE
+
+    if as_json:
+        _emit_status_json(project_root, meta_path)
+        return
 
     # ── Index ─────────────────────────────────────────────────────────────────
     console.print()
