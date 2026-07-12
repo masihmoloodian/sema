@@ -17,13 +17,15 @@
 
 Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never reads files blindly again, plus a reuse guard so it stops reinventing helpers you already have.
 
+That same index also powers the **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** — a **Cursor-style chat panel** for your codebase. Talk to it through the **Claude Code** and **Codex** you already run locally (no re-login), or your own **Anthropic / OpenAI** API keys — switching **provider and model within a single conversation**, and toggling the index on to hand the chat exactly the code it needs.
+
 Works with
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
 <a href="https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **Claude Code VS Code**</a>,
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
 <a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
-Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a chat panel to work with your codebase using Claude or OpenAI, right in the editor.
+Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a Cursor-style chat panel that talks to your codebase through the Claude Code and Codex you already run locally, or your own API keys.
 
 ## Features
 
@@ -32,7 +34,7 @@ Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=Mas
 - **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
-- **🧩 VS Code extension — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor.** [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+- **🧩 VS Code extension — a Cursor-style chat panel: chat with Claude Code / Codex / Anthropic / OpenAI, switching provider and model in one session, with the index as context — plus search, reuse, and index management.** [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
 ## Why sema
 
@@ -77,7 +79,7 @@ See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/archite
 [![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?label=VS%20Code%20Marketplace&color=1e88e5&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/MasihMoloodian.sema-codebase-chat?color=1e88e5)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
-Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is on the VS Code Marketplace — it brings the whole toolset into the editor, plus a codebase-aware **chat panel**:
+Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is on the VS Code Marketplace — a **Cursor-style chat panel** for your codebase, backed by the same local index. Chat through the **Claude Code** and **Codex** you already have installed (or your own API keys), and switch **provider and model mid-session**:
 
 - **💬 Chat with your code** through four providers — **Claude Code** and **Codex** running locally (reuse your existing login, no API key; they read the repo and, in Agent mode, edit it), or the **Anthropic** and **OpenAI** APIs with your own key.
 - **🧭 Ask / Agent modes**, a **reasoning-effort** selector, streamed thinking and tool activity, and **per-session memory** — just like the terminal apps, and prompts pass straight through (no wrapper persona).
