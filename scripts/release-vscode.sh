@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Package (and optionally publish) a new version of the sema VS Code extension.
+# Release a new version of the sema VS Code extension.
 #
-#   scripts/release-vscode.sh <patch|minor|major|x.y.z>            build the .vsix
-#   scripts/release-vscode.sh <patch|minor|major|x.y.z> --publish  build + publish
+#   scripts/release-vscode.sh <patch|minor|major|x.y.z>            tag -> CI publishes
+#   scripts/release-vscode.sh <patch|minor|major|x.y.z> --publish  publish directly (local PAT)
 #
 # Bumps vscode-extension/package.json, builds the .vsix, and commits the bump.
-# With --publish it also uploads to the Marketplace via `vsce publish`, which
-# needs a Personal Access Token: set VSCE_PAT, or run
-#   cd vscode-extension && npx vsce login MasihMoloodian
-# once beforehand.
+#   default:   pushes a `vscode-v<version>` tag that triggers
+#              .github/workflows/publish-vscode.yml (needs the VSCE_PAT repo secret).
+#   --publish: instead runs `vsce publish` locally (needs VSCE_PAT env, or a prior
+#              `cd vscode-extension && npx vsce login MasihMoloodian`).
 #
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,11 +31,12 @@ npm install --silent
 
 echo "==> bump version ($BUMP)"
 NEW=$(npm version "$BUMP" --no-git-tag-version)   # prints vX.Y.Z
+VER="${NEW#v}"
 echo "    $NEW"
 
-echo "==> package the .vsix"
+echo "==> package the .vsix (validates the build)"
 npm run package
-VSIX="sema-codebase-chat-${NEW#v}.vsix"
+echo "    vscode-extension/sema-codebase-chat-$VER.vsix"
 
 echo "==> commit version bump"
 git add package.json package-lock.json
@@ -43,14 +44,18 @@ git commit -m "release(vscode): $NEW"
 git push origin main
 
 if [[ "$PUBLISH" == "--publish" ]]; then
-  echo "==> vsce publish"
+  echo "==> vsce publish (direct)"
   npx vsce publish
   echo "Published $NEW to the VS Code Marketplace."
 else
+  echo "==> tag vscode-$NEW (triggers the publish workflow)"
+  git tag "vscode-$NEW"
+  git push origin "vscode-$NEW"
   cat <<EOF
 
-Built vscode-extension/$VSIX (version ${NEW#v}). To publish it:
-  - upload it at https://marketplace.visualstudio.com/manage/publishers/MasihMoloodian
-  - or re-run with --publish (needs a PAT): scripts/release-vscode.sh $BUMP --publish
+Tagged vscode-$NEW. The Marketplace publish runs in CI (needs the VSCE_PAT secret):
+  https://github.com/masihmoloodian/sema/actions
+Or upload vscode-extension/sema-codebase-chat-$VER.vsix manually at
+  https://marketplace.visualstudio.com/manage/publishers/MasihMoloodian
 EOF
 fi
