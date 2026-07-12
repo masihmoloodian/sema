@@ -21,30 +21,21 @@ the **VS Code extension** itself. Install the CLI first.
 
 ### 1. Install the sema CLI
 
-sema isn't on PyPI yet, so install it from source — this is the exact setup the
-extension expects. **uv (recommended):**
+The extension drives the `sema` CLI, so install it first:
+
+```bash
+pip install sema-mcp        # or: uv tool install sema-mcp
+sema --version              # verify
+```
+
+<details>
+<summary>Install from source instead (for development)</summary>
 
 ```bash
 git clone https://github.com/masihmoloodian/sema.git
 cd sema
 uv venv --python 3.12 .venv
 uv pip install -e ".[dev]"
-
-# add sema to your PATH so it's callable from any project:
-echo "export PATH=\"$(pwd)/.venv/bin:\$PATH\"" >> ~/.zshrc && source ~/.zshrc
-
-sema --version   # verify — run from any directory
-```
-
-<details>
-<summary>Using pip instead of uv</summary>
-
-```bash
-git clone https://github.com/masihmoloodian/sema.git
-cd sema
-python3 -m venv .venv
-source .venv/bin/activate        # macOS / Linux  (Windows: .venv\Scripts\activate)
-pip install -e ".[dev]"
 echo "export PATH=\"$(pwd)/.venv/bin:\$PATH\"" >> ~/.zshrc && source ~/.zshrc
 sema --version
 ```
@@ -52,11 +43,10 @@ sema --version
 
 Requires Python 3.11+. Full guide: [docs/installation.md](../docs/installation.md).
 
-> **Recommended for the extension:** VS Code launched from the Dock/Finder often
-> doesn't inherit your shell `PATH`, so it may not find `sema` even after the export
-> above. The most reliable setup — and the one used locally — is to leave the binary
-> in the venv and point the extension straight at it: set `sema.binaryPath` to the
-> absolute path, e.g. `/path/to/sema/.venv/bin/sema` (see [step 4](#4-first-run-setup)).
+> **If VS Code can't find `sema`:** apps launched from the Dock/Finder often don't
+> inherit your shell `PATH`. The reliable fix is to point the extension straight at the
+> binary — run `which sema` and set `sema.binaryPath` to that absolute path
+> (see [step 4](#4-first-run-setup)).
 
 ### 2. Chat prerequisites
 
@@ -91,9 +81,8 @@ Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
 
 1. **Open your project folder** (`File → Open Folder…`). sema works against the
    open folder; chat providers that read the repo use the enclosing git root.
-2. **Point the extension at the sema binary.** Set `sema.binaryPath` to the absolute
-   `.venv/bin/sema` path from step 1 (e.g. `/path/to/sema/.venv/bin/sema`) — the most
-   reliable option — or leave it as `sema` if the CLI is on VS Code's PATH. See
+2. **Point the extension at the sema binary** if VS Code can't find it on its `PATH`:
+   run `which sema` and set `sema.binaryPath` to that absolute path. See
    [Configuration](#configuration).
 3. **Build the index.** Open the **sema** view → **Manage** → **Re-index**
    (or run `sema index .` in a terminal). The chat panel can also build it

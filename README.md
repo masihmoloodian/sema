@@ -40,12 +40,8 @@ See the [benchmarks](docs/benchmarks.md) for measured token savings on real open
 ## Quick start
 
 ```bash
-# 1. Install (from source — not yet on PyPI)
-git clone https://github.com/masihmoloodian/sema.git
-cd sema
-uv venv --python 3.12 .venv
-uv pip install -e ".[dev]"
-echo "export PATH=\"$(pwd)/.venv/bin:\$PATH\"" >> ~/.zshrc && source ~/.zshrc
+# 1. Install — provides the `sema` command
+pip install sema-mcp        # or: uv tool install sema-mcp
 
 # 2. Index your project and register with your AI assistant
 cd your-project
@@ -54,6 +50,8 @@ sema init --claude     # or: sema init --codex
 
 # 3. Reload VS Code, then type /mcp to confirm sema is connected
 ```
+
+Requires **Python 3.11+**. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](docs/installation.md#install-from-source-for-development).
 
 Then add a `CLAUDE.md` (or `AGENTS.md` for Codex) so your assistant calls sema before reading files — see [Claude Code setup](docs/claude-code.md) or [OpenAI Codex setup](docs/codex.md).
 
@@ -88,7 +86,7 @@ Full docs live in [`docs/`](docs/README.md):
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | Requirements and install from source |
+| [Installation](docs/installation.md) | Requirements, `pip install`, and install from source |
 | [sema for VS Code](vscode-extension/README.md) | sema's own VS Code extension — chat panel, search, reuse, and index management |
 | [Claude Code setup](docs/claude-code.md) · [Codex setup](docs/codex.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
 | [Working with multiple projects](docs/multi-project.md) | Serve many repos from one registration |

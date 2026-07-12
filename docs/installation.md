@@ -9,9 +9,19 @@
 - ~80MB disk space for the embedding model (downloaded once, cached globally)
 - No Docker, no external APIs, no GPU — runs entirely on your machine
 
-## Install from source
+## Install
 
-> sema is not yet published to PyPI. Install from source.
+```bash
+pip install sema-mcp
+```
+
+This installs the `sema` command. With uv: `uv tool install sema-mcp`. Verify with `sema --version`.
+
+> On PyPI the distribution is named **`sema-mcp`** (the name `sema` was already taken); the command and the import are both `sema`.
+
+## Install from source (for development)
+
+> For contributing, or to run the latest unreleased code.
 
 ### Using uv (recommended)
 
