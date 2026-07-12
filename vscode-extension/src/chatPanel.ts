@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { SemaClient, SessionUsage } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
-import { TokenUsage } from './providers/types';
+import { ChatProvider, TokenUsage } from './providers/types';
+
+const execFileAsync = promisify(execFile);
 
 const PROVIDER_KEY = 'sema.chat.provider';
 const MODEL_KEY = 'sema.chat.model';
@@ -51,6 +55,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private controller?: AbortController;
   private sessionId?: string;
   private sessionProvider?: string;
+  private loginTerm?: vscode.Terminal;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -106,6 +111,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true };
     view.webview.html = this.getHtml();
     view.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
+    // Re-check sign-in state when the panel regains focus (e.g. after logging in
+    // via the terminal) or when the login terminal is closed.
+    view.onDidChangeVisibility(() => {
+      if (view.visible) {
+        void this.refreshAuthState();
+      }
+    });
+    vscode.window.onDidCloseTerminal((t) => {
+      if (t === this.loginTerm) {
+        this.loginTerm = undefined;
+        void this.refreshAuthState();
+      }
+    });
   }
 
   clearConversation(): void {
@@ -170,6 +188,93 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     vscode.window.showInformationMessage(`sema: ${provider.label} key ${key ? 'saved' : 'cleared'}.`);
   }
 
+  // ── CLI auth (Claude Code / Codex sign-in) ─────────────────────────────────
+  private cliBinFor(provider: ChatProvider): string {
+    const cfg = vscode.workspace.getConfiguration('sema');
+    if (provider.id === 'claude-code') {
+      return cfg.get<string>('chat.claudePath') || 'claude';
+    }
+    if (provider.id === 'codex') {
+      return cfg.get<string>('chat.codexPath') || 'codex';
+    }
+    return provider.id;
+  }
+
+  /** Open a terminal and run the CLI's own login — interactive OAuth in the browser. */
+  private loginTerminal(): void {
+    const provider = getProvider(this.providerId);
+    if (!provider.auth) {
+      return;
+    }
+    const bin = this.cliBinFor(provider);
+    const term = vscode.window.createTerminal({
+      name: `sema · ${provider.label}`,
+      cwd: this.repoRoot || undefined,
+    });
+    this.loginTerm = term;
+    term.show();
+    term.sendText(`"${bin}" ${provider.auth.login.join(' ')}`);
+    this.view?.webview.postMessage({
+      type: 'notice',
+      text: `Opened a terminal to sign in to ${provider.label}. Finish in your browser, then send your message again.`,
+    });
+  }
+
+  private async logout(): Promise<void> {
+    const provider = getProvider(this.providerId);
+    if (!provider.auth) {
+      return;
+    }
+    const ok = await vscode.window.showWarningMessage(`Sign out of ${provider.label}?`, 'Sign out');
+    if (ok !== 'Sign out') {
+      return;
+    }
+    try {
+      await execFileAsync(this.cliBinFor(provider), provider.auth.logout, {
+        cwd: this.repoRoot || undefined,
+      });
+      vscode.window.showInformationMessage(`sema: signed out of ${provider.label}.`);
+    } catch (e) {
+      vscode.window.showErrorMessage(`sema: sign-out failed: ${(e as Error).message}`);
+    }
+    await this.refreshAuthState();
+  }
+
+  /** Ask the provider CLI whether it's signed in, and update the panel's Login button. */
+  private async refreshAuthState(): Promise<void> {
+    const view = this.view;
+    if (!view) {
+      return;
+    }
+    const provider = getProvider(this.providerId);
+    if (!provider.auth) {
+      view.webview.postMessage({ type: 'auth', canLogin: false });
+      return;
+    }
+    let loggedIn = false;
+    try {
+      const { stdout } = await execFileAsync(this.cliBinFor(provider), provider.auth.status, {
+        cwd: this.repoRoot || undefined,
+      });
+      const out = stdout.trim();
+      try {
+        // Claude Code prints JSON: { "loggedIn": true, ... }
+        const j = JSON.parse(out) as { loggedIn?: boolean };
+        loggedIn =
+          typeof j.loggedIn === 'boolean'
+            ? j.loggedIn
+            : !/not\s+logged\s*in|not\s+authenticated|logged\s+out/i.test(out);
+      } catch {
+        // Codex prints plain text ("Not logged in" when signed out).
+        loggedIn = !/not\s+logged\s*in|not\s+authenticated|logged\s+out|no\s+credentials/i.test(out);
+      }
+    } catch {
+      // Non-zero exit (or CLI not found) — treat as not signed in.
+      loggedIn = false;
+    }
+    view.webview.postMessage({ type: 'auth', canLogin: true, loggedIn });
+  }
+
   /** When the index toggle turns on, ensure an index exists — build it (with progress) if not. */
   private async ensureIndexReady(): Promise<void> {
     const client = this.makeClient();
@@ -215,6 +320,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case 'ready':
         await this.sendConfig();
+        void this.refreshAuthState();
         break;
       case 'send':
         await this.handleSend(String(msg.text ?? ''));
@@ -226,6 +332,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.context.globalState.update(PROVIDER_KEY, String(msg.provider));
         await this.context.globalState.update(MODEL_KEY, undefined);
         await this.sendConfig();
+        void this.refreshAuthState();
         break;
       case 'setModel':
         await this.context.globalState.update(MODEL_KEY, String(msg.model));
@@ -267,6 +374,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'setKey':
         await this.promptForKey();
         break;
+      case 'login':
+        this.loginTerminal();
+        break;
+      case 'logout':
+        await this.logout();
+        break;
       case 'clear':
         this.clearConversation();
         break;
@@ -298,6 +411,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       useIndex: this.useIndex,
       requiresKey: provider.requiresKey,
       hasKey,
+      canLogin: !!provider.auth,
     });
   }
 
@@ -396,7 +510,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.history.pop();
         this.sessionId = undefined;
         this.sessionProvider = undefined;
-        view.webview.postMessage({ type: 'error', message: (err as Error).message });
+        const message = (err as Error).message;
+        view.webview.postMessage({ type: 'error', message });
+        // Not signed in? Offer a one-click login for the CLI providers.
+        if (
+          provider.auth &&
+          /not logged in|please run.*\/login|\/login|not authenticated|unauthorized/i.test(message)
+        ) {
+          void this.refreshAuthState();
+          const pick = await vscode.window.showWarningMessage(
+            `sema: not signed in to ${provider.label}.`,
+            'Log in',
+          );
+          if (pick === 'Log in') {
+            this.loginTerminal();
+          }
+        }
       }
     } finally {
       view.webview.postMessage({ type: 'assistantEnd' });
@@ -497,6 +626,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <select id="effort" title="Reasoning effort"></select>
     <button id="indexbtn" title="Use sema's semantic index as extra context (like Cursor's codebase context)">index: off</button>
     <button id="setkey" title="Set API key">Set key</button>
+    <button id="loginbtn" title="Sign in to the selected CLI (Claude Code / Codex)">Log in</button>
     <button id="clear" title="Start a new chat (new session)">New chat</button>
     <span id="modelinfo" title="Model used for this chat"></span>
   </div>
@@ -518,6 +648,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var modeSel = document.getElementById('mode');
     var effortSel = document.getElementById('effort');
     var setkeyBtn = document.getElementById('setkey');
+    var loginBtn = document.getElementById('loginbtn');
+    var loggedInState = false;
     var modelInfo = document.getElementById('modelinfo');
     var indexBtn = document.getElementById('indexbtn');
     var useIndex = false;
@@ -574,6 +706,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     effortSel.addEventListener('change', function(){ vscode.postMessage({type:'setEffort', effort:effortSel.value}); });
     indexBtn.addEventListener('click', function(){ useIndex = !useIndex; applyIndexBtn(); vscode.postMessage({type:'setIndex', value:useIndex}); });
     setkeyBtn.addEventListener('click', function(){ vscode.postMessage({type:'setKey'}); });
+    loginBtn.addEventListener('click', function(){ vscode.postMessage({type: loggedInState ? 'logout' : 'login'}); });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
 
     window.addEventListener('message', function(ev){
@@ -597,6 +730,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         } else {
           setkeyBtn.style.display = 'none';
         }
+        if (!m.canLogin){ loginBtn.style.display = 'none'; loggedInState = false; } else { loginBtn.style.display = ''; }
       } else if (m.type === 'userMessage'){ addBubble('user').textContent = m.text; }
       else if (m.type === 'status'){ statusEl.textContent = m.text; }
       else if (m.type === 'assistantStart'){ if (revealTimer && answerEl && shownLen < answerRaw.length){ answerEl.innerHTML = render(answerRaw); } if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = addBubble('assistant'); curEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>'; answerEl=null; traceEl=null; answerRaw=''; thinkBody=null; started=false; shownLen=0; setStreaming(true); statusEl.textContent = ''; }
@@ -608,6 +742,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       else if (m.type === 'clear'){ messagesEl.innerHTML = ''; modelInfo.textContent = ''; }
       else if (m.type === 'model'){ modelInfo.textContent = '→ ' + m.model; }
       else if (m.type === 'notice'){ var nt=document.createElement('div'); nt.className='notice'; nt.textContent = m.text; messagesEl.appendChild(nt); messagesEl.scrollTop = messagesEl.scrollHeight; }
+      else if (m.type === 'auth'){ if (!m.canLogin){ loginBtn.style.display='none'; loggedInState=false; } else { loginBtn.style.display=''; loggedInState=!!m.loggedIn; loginBtn.textContent = m.loggedIn ? '✓ Signed in' : 'Log in'; loginBtn.className = m.loggedIn ? 'ok' : 'warn'; loginBtn.title = m.loggedIn ? 'Signed in — click to sign out' : 'Sign in to the selected CLI (Claude Code / Codex)'; } }
     });
 
     setStreaming(false);

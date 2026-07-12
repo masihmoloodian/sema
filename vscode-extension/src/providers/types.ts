@@ -58,5 +58,7 @@ export interface ChatProvider {
   readonly secretKey?: string;
   /** Where the user obtains a key — only for key providers. */
   readonly keyHint?: string;
+  /** CLI auth verbs (args for the provider's CLI). Absent for API-key providers. */
+  readonly auth?: { login: string[]; logout: string[]; status: string[] };
   stream(opts: StreamOptions): Promise<void>;
 }

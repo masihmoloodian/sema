@@ -192,6 +192,7 @@ export class ClaudeCodeProvider extends CliProvider {
   readonly models = ['default', 'fable', 'opus', 'sonnet', 'haiku'];
   readonly defaultModel = 'default';
   readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
+  readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'status'] };
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
     const args = ['-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose'];
@@ -312,6 +313,7 @@ export class CodexProvider extends CliProvider {
   readonly models = ['default', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
   readonly defaultModel = 'default';
   readonly efforts = ['default', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  readonly auth = { login: ['login'], logout: ['logout'], status: ['login', 'status'] };
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
     const effort =

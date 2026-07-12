@@ -51,8 +51,9 @@ Requires Python 3.11+. Full guide: [docs/installation.md](../docs/installation.m
 ### 2. Chat prerequisites
 
 For the chat panel you need **at least one** of:
-- the **Claude Code** and/or **Codex** CLI installed and logged in (recommended — no
-  key management, and they can edit files in Agent mode), or
+- the **Claude Code** and/or **Codex** CLI installed and signed in (recommended — no
+  key management, and they can edit files in Agent mode). Not signed in yet? Just
+  click **Log in** in the panel — it runs the CLI's own browser sign-in. Or:
 - an **Anthropic** and/or **OpenAI** API key (added from the panel — stored in VS
   Code SecretStorage, never in settings).
 
@@ -94,9 +95,12 @@ Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
 - **Chat** — a Cursor-style panel with provider, model, and reasoning-**effort**
   pickers, plus **Ask** (read-only) / **Agent** (can edit files) modes. Local CLI
   providers stream thinking and tool activity like their terminal apps do, and
-  keep **per-session memory** across turns. Each chat is one session; **New chat**
-  starts a fresh one. Toggle **index** on to inject sema's semantic context (RAG) —
-  useful for API providers, which can't read files themselves.
+  keep **per-session memory** across turns. A **Log in** button signs you into
+  Claude Code / Codex from the panel (via each CLI's own browser flow) and shows
+  your sign-in state; if a message fails because you're not signed in, a one-click
+  **Log in** prompt appears. Each chat is one session; **New chat** starts a fresh
+  one. Toggle **index** on to inject sema's semantic context (RAG) — useful for API
+  providers, which can't read files themselves.
 - **Manage** — index status, chunk/file counts, model, last-updated time, index
   path, the sema binary in use, Claude Code / Codex registration, a file **watch**
   toggle, and the current chat session's **token usage and estimated cost**. Plus
