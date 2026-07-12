@@ -1,5 +1,5 @@
 [project]
-name = "sema"
+name = "sema-mcp"
 version = "0.1.0"
 description = "Semantic codebase indexer and MCP server for Claude Code"
 authors = [{name = "Masih Moloodian", email = "masihmoloodian@gmail.com"}]
@@ -53,6 +53,15 @@ Issues = "https://github.com/masihmoloodian/sema/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Package only the sema/ code. Explicit `packages` is required once the
+# distribution name differs from the import package name, and it keeps the
+# sdist from sweeping in vscode-extension/, tests/, docs/, etc.
+[tool.hatch.build.targets.wheel]
+packages = ["sema"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["sema", "README.md", "LICENSE"]
 
 [tool.ruff]
 line-length = 100
