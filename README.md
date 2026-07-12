@@ -4,6 +4,13 @@
   <img src="https://raw.githubusercontent.com/masihmoloodian/sema/main/logo.png" alt="Sema" width="480" />
 </p>
 
+<p align="center">
+  <a href="https://pypi.org/project/sema-mcp/"><img src="https://img.shields.io/pypi/v/sema-mcp?color=1e88e5&label=PyPI" alt="PyPI version" /></a>
+  <a href="https://pypi.org/project/sema-mcp/"><img src="https://img.shields.io/pypi/pyversions/sema-mcp" alt="Python versions" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?color=1e88e5&label=VS%20Code%20Marketplace&logo=visualstudiocode" alt="VS Code Marketplace" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" />
+</p>
+
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](docs/faq.md#disclaimer).
 
 **Stop wasting tokens — on navigating your codebase, and on rewriting code that already exists. Speed up Claude Code and OpenAI Codex on large codebases.**
