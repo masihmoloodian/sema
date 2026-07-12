@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" />
 </p>
 
-> **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](docs/faq.md#disclaimer).
+> **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](https://github.com/masihmoloodian/sema/blob/main/docs/faq.md#disclaimer).
 
 **Stop wasting tokens — on navigating your codebase, and on rewriting code that already exists. Speed up Claude Code and OpenAI Codex on large codebases.**
 
@@ -42,7 +42,7 @@ Sema gives it a search index instead. Instead of reading a dozen files to answer
 
 That's the *reading* half of the token bill. Sema goes after the *writing* half too: before your assistant adds a new helper, `check_reuse()` searches the index for an existing one and answers **reuse / review / safe-to-build** — so it extends what's already there instead of shipping a fourth function that does the same thing.
 
-See the [benchmarks](docs/benchmarks.md) for measured token savings on real open-source repos.
+See the [benchmarks](https://github.com/masihmoloodian/sema/blob/main/docs/benchmarks.md) for measured token savings on real open-source repos.
 
 ## Quick start
 
@@ -58,9 +58,9 @@ sema init --claude     # or: sema init --codex
 # 3. Reload VS Code, then type /mcp to confirm sema is connected
 ```
 
-Requires **Python 3.11+**. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](docs/installation.md#install-from-source-for-development).
+Requires **Python 3.11+**. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md#install-from-source-for-development).
 
-Then add a `CLAUDE.md` (or `AGENTS.md` for Codex) so your assistant calls sema before reading files — see [Claude Code setup](docs/claude-code.md) or [OpenAI Codex setup](docs/codex.md).
+Then add a `CLAUDE.md` (or `AGENTS.md` for Codex) so your assistant calls sema before reading files — see [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) or [OpenAI Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md).
 
 Requires Python 3.11+. No Docker, no external APIs, no GPU — everything runs on your machine.
 
@@ -68,9 +68,9 @@ Requires Python 3.11+. No Docker, no external APIs, no GPU — everything runs o
 
 `sema index .` uses tree-sitter to parse every function, class, and method, embeds each one locally with SBERT (`all-MiniLM-L6-v2`), and stores the vectors plus full source in an embedded ChromaDB. A local MCP server then exposes search tools to Claude/Codex over stdio. `search_code()` returns signatures only; `get_code()` returns full bodies on demand.
 
-The same index powers the rest of the toolset: [`check_reuse()`](docs/mcp-tools.md#check_reuse--dont-rewrite-what-already-exists) (*does this already exist?*), [`impact_analysis()`](docs/mcp-tools.md#impact_analysis--call-graph) (call graph and blast radius), and [multi-project serving](docs/multi-project.md) — all fully offline.
+The same index powers the rest of the toolset: [`check_reuse()`](https://github.com/masihmoloodian/sema/blob/main/docs/mcp-tools.md#check_reuse--dont-rewrite-what-already-exists) (*does this already exist?*), [`impact_analysis()`](https://github.com/masihmoloodian/sema/blob/main/docs/mcp-tools.md#impact_analysis--call-graph) (call graph and blast radius), and [multi-project serving](https://github.com/masihmoloodian/sema/blob/main/docs/multi-project.md) — all fully offline.
 
-See [Architecture](docs/architecture.md) for the full picture.
+See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/architecture.md) for the full picture.
 
 ## sema for VS Code
 
@@ -85,34 +85,34 @@ Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com
 - **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost** for the session.
 - **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
 
-**Install:** search **"sema"** in the Extensions view, run `code --install-extension MasihMoloodian.sema-codebase-chat`, or open the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat). Prefer to build from source? See the [extension guide](vscode-extension/README.md#build-from-source).
+**Install:** search **"sema"** in the Extensions view, run `code --install-extension MasihMoloodian.sema-codebase-chat`, or open the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat). Prefer to build from source? See the [extension guide](https://github.com/masihmoloodian/sema/blob/main/vscode-extension/README.md#build-from-source).
 
 ## Documentation
 
-Full docs live in [`docs/`](docs/README.md):
+Full docs live in [`docs/`](https://github.com/masihmoloodian/sema/blob/main/docs/README.md):
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | Requirements, `pip install`, and install from source |
-| [sema for VS Code](vscode-extension/README.md) | sema's own VS Code extension — chat panel, search, reuse, and index management |
-| [Claude Code setup](docs/claude-code.md) · [Codex setup](docs/codex.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
-| [Working with multiple projects](docs/multi-project.md) | Serve many repos from one registration |
-| [CLI reference](docs/cli-reference.md) | Every `sema` command |
-| [MCP tools](docs/mcp-tools.md) | The tools your AI assistant calls |
-| [Supported languages](docs/languages.md) | AST-aware vs text-aware indexing |
-| [Configuration](docs/configuration.md) | Config file, env vars, `.gitignore` |
-| [Managing sema](docs/managing-sema.md) | Update, remove, and when to re-index |
-| [Troubleshooting](docs/troubleshooting.md) | Fixes for common issues |
-| [Benchmarks](docs/benchmarks.md) · [FAQ](docs/faq.md) · [Roadmap](docs/roadmap.md) | Background and details |
-| [Contributing](docs/contributing.md) | Development setup and how to extend sema |
+| [Installation](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md) | Requirements, `pip install`, and install from source |
+| [sema for VS Code](https://github.com/masihmoloodian/sema/blob/main/vscode-extension/README.md) | sema's own VS Code extension — chat panel, search, reuse, and index management |
+| [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) · [Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md) · [VS Code workspace](https://github.com/masihmoloodian/sema/blob/main/docs/vscode-workspace.md) | Register sema with your assistant |
+| [Working with multiple projects](https://github.com/masihmoloodian/sema/blob/main/docs/multi-project.md) | Serve many repos from one registration |
+| [CLI reference](https://github.com/masihmoloodian/sema/blob/main/docs/cli-reference.md) | Every `sema` command |
+| [MCP tools](https://github.com/masihmoloodian/sema/blob/main/docs/mcp-tools.md) | The tools your AI assistant calls |
+| [Supported languages](https://github.com/masihmoloodian/sema/blob/main/docs/languages.md) | AST-aware vs text-aware indexing |
+| [Configuration](https://github.com/masihmoloodian/sema/blob/main/docs/configuration.md) | Config file, env vars, `.gitignore` |
+| [Managing sema](https://github.com/masihmoloodian/sema/blob/main/docs/managing-sema.md) | Update, remove, and when to re-index |
+| [Troubleshooting](https://github.com/masihmoloodian/sema/blob/main/docs/troubleshooting.md) | Fixes for common issues |
+| [Benchmarks](https://github.com/masihmoloodian/sema/blob/main/docs/benchmarks.md) · [FAQ](https://github.com/masihmoloodian/sema/blob/main/docs/faq.md) · [Roadmap](https://github.com/masihmoloodian/sema/blob/main/docs/roadmap.md) | Background and details |
+| [Contributing](https://github.com/masihmoloodian/sema/blob/main/docs/contributing.md) | Development setup and how to extend sema |
 
 ## Contributing
 
-Contributions are welcome — sema is intentionally small and easy to extend. See [Contributing](docs/contributing.md) for development setup and how to add a new language.
+Contributions are welcome — sema is intentionally small and easy to extend. See [Contributing](https://github.com/masihmoloodian/sema/blob/main/docs/contributing.md) for development setup and how to add a new language.
 
 ## License
 
-MIT License — free to use, modify, and distribute. See [LICENSE](LICENSE).
+MIT License — free to use, modify, and distribute. See [LICENSE](https://github.com/masihmoloodian/sema/blob/main/LICENSE).
 
 Copyright (c) 2026 Masih Moloodian
 
