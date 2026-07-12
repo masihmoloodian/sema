@@ -1,7 +1,7 @@
 # Sema
 
 <p align="center">
-  <img src="logo.png" alt="Sema" width="480" />
+  <img src="https://raw.githubusercontent.com/masihmoloodian/sema/main/logo.png" alt="Sema" width="480" />
 </p>
 
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](docs/faq.md#disclaimer).
