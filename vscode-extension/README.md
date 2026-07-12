@@ -68,8 +68,8 @@ For the chat panel you need **at least one** of:
 
 ### 3. Install the extension (`.vsix`)
 
-You install a packaged `sema-vscode-<version>.vsix` file (e.g.
-`sema-vscode-0.1.0.vsix`). Two ways:
+You install a packaged `sema-codebase-chat-<version>.vsix` file (e.g.
+`sema-codebase-chat-0.1.0.vsix`). Two ways:
 
 **From the VS Code UI**
 1. Open the **Extensions** view (`⇧⌘X` / `Ctrl+Shift+X`).
@@ -79,7 +79,7 @@ You install a packaged `sema-vscode-<version>.vsix` file (e.g.
 **From the command line** (needs the `code` command — in VS Code run
 *Shell Command: Install 'code' command in PATH* first if it's missing):
 ```
-code --install-extension sema-vscode-0.1.0.vsix
+code --install-extension sema-codebase-chat-0.1.0.vsix
 ```
 
 Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
@@ -133,7 +133,7 @@ Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
 ```
 cd vscode-extension
 npm install
-npm run package      # → sema-vscode-<version>.vsix (runs the esbuild bundle first)
+npm run package      # → sema-codebase-chat-<version>.vsix (runs the esbuild bundle first)
 ```
 
 Then install the generated `.vsix` as in [step 3](#3-install-the-extension-vsix).

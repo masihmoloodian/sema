@@ -1,5 +1,5 @@
 {
-  "name": "sema-vscode",
+  "name": "sema-codebase-chat",
   "displayName": "sema — semantic code search & chat",
   "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude + OpenAI), powered by the local sema index.",
   "version": "0.1.0",
