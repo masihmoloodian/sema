@@ -16,7 +16,7 @@ Works with
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
 <a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
-Plus sema's own <a href="vscode-extension/README.md"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a chat panel to work with your codebase using Claude or OpenAI, right in the editor.
+Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a chat panel to work with your codebase using Claude or OpenAI, right in the editor.
 
 ## Features
 
@@ -25,7 +25,7 @@ Plus sema's own <a href="vscode-extension/README.md"><img src="https://cdn.jsdel
 - **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
-- **🧩 VS Code extension — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor.** [Learn more →](vscode-extension/README.md)
+- **🧩 VS Code extension — a codebase-aware chat panel (Claude Code / Codex / Anthropic / OpenAI) plus search, reuse, and index management, right in the editor.** [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
 ## Why sema
 
@@ -69,7 +69,10 @@ See [Architecture](docs/architecture.md) for the full picture.
 
 ## sema for VS Code
 
-Prefer a UI? The **[sema VS Code extension](vscode-extension/README.md)** brings the whole toolset into the editor — plus a codebase-aware **chat panel**:
+[![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?label=VS%20Code%20Marketplace&color=1e88e5&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/MasihMoloodian.sema-codebase-chat?color=1e88e5)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+
+Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is on the VS Code Marketplace — it brings the whole toolset into the editor, plus a codebase-aware **chat panel**:
 
 - **💬 Chat with your code** through four providers — **Claude Code** and **Codex** running locally (reuse your existing login, no API key; they read the repo and, in Agent mode, edit it), or the **Anthropic** and **OpenAI** APIs with your own key.
 - **🧭 Ask / Agent modes**, a **reasoning-effort** selector, streamed thinking and tool activity, and **per-session memory** — just like the terminal apps, and prompts pass straight through (no wrapper persona).
@@ -77,7 +80,7 @@ Prefer a UI? The **[sema VS Code extension](vscode-extension/README.md)** brings
 - **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost** for the session.
 - **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
 
-Install it from a packaged `.vsix` — see the [extension guide](vscode-extension/README.md#installation).
+**Install:** search **"sema"** in the Extensions view, run `code --install-extension MasihMoloodian.sema-codebase-chat`, or open the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat). Prefer to build from source? See the [extension guide](vscode-extension/README.md#build-from-source).
 
 ## Documentation
 
