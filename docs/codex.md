@@ -1,5 +1,32 @@
 # OpenAI Codex setup
 
+## Install the Codex CLI
+
+sema's **Codex** provider drives the `codex` CLI, so install it first (skip if you
+already have it). Sign in with your ChatGPT account (Plus / Pro / Business / Edu /
+Enterprise) — no API key needed.
+
+```bash
+# macOS / Linux (recommended)
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+# Homebrew
+brew install --cask codex
+
+# npm
+npm install -g @openai/codex
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```
+
+Then start it once and choose **Sign in with ChatGPT**:
+
+```bash
+codex             # select "Sign in with ChatGPT"
+codex --version   # verify
+```
+
 ## Step-by-step setup
 
 ```bash

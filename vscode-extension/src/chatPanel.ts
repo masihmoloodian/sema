@@ -5,6 +5,7 @@ import * as path from 'path';
 import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
 import { ChatProvider, TokenUsage } from './providers/types';
+import { redactPieces, redactionSummary } from './redact';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,7 @@ const PROVIDER_KEY = 'sema.chat.provider';
 const MODEL_KEY = 'sema.chat.model';
 const MODE_KEY = 'sema.chat.mode';
 const INDEX_KEY = 'sema.chat.useIndex';
+const REDACT_KEY = 'sema.chat.redact';
 const EFFORT_KEY = 'sema.chat.effort';
 const CUSTOM_MODELS_KEY = 'sema.chat.customModels';
 const RESOLVED_DEFAULT_KEY = 'sema.chat.resolvedDefault';
@@ -108,6 +110,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private sessionId?: string;
   private sessionProvider?: string;
   private loginTerm?: vscode.Terminal;
+  private redactHintShown = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -150,6 +153,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private get useIndex(): boolean {
     return this.context.globalState.get<boolean>(INDEX_KEY) ?? false;
+  }
+
+  private get redact(): boolean {
+    return this.context.globalState.get<boolean>(REDACT_KEY) ?? false;
   }
 
   private get effort(): string {
@@ -398,6 +405,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           await this.ensureIndexReady();
         }
         break;
+      case 'setRedact':
+        await this.context.globalState.update(REDACT_KEY, !!msg.value);
+        break;
       case 'setEffort':
         await this.context.globalState.update(EFFORT_KEY, String(msg.effort));
         break;
@@ -470,6 +480,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       effort: this.effort,
       defaults: this.context.globalState.get<Record<string, string>>(RESOLVED_DEFAULT_KEY) ?? {},
       useIndex: this.useIndex,
+      redact: this.redact,
       requiresKey: provider.requiresKey,
       hasKey,
       canLogin: !!provider.auth,
@@ -530,6 +541,38 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    // PII redaction (opt-in): scrub secrets/PII from everything sent to the model.
+    let outContext = context;
+    let outMessages: ChatMessage[] = this.history;
+    if (this.redact) {
+      view.webview.postMessage({ type: 'status', text: 'redacting sensitive data…' });
+      const semaBin = vscode.workspace.getConfiguration('sema').get<string>('binaryPath') || 'sema';
+      const pieces = [context, ...this.history.map((m) => m.content)];
+      const res = await redactPieces(pieces, {
+        semaBin,
+        cwd: this.repoRoot,
+        signal: this.controller.signal,
+      });
+      outContext = res.pieces[0] ?? context;
+      outMessages = this.history.map((m, i) => ({ role: m.role, content: res.pieces[i + 1] ?? m.content }));
+      const summary = redactionSummary(res.found);
+      if (summary) {
+        view.webview.postMessage({ type: 'notice', text: `🛡 Redacted before sending: ${summary}.` });
+      }
+      if (!res.nerRan && !this.redactHintShown) {
+        this.redactHintShown = true;
+        view.webview.postMessage({
+          type: 'notice',
+          text: "Redaction is patterns-only. To also catch names/locations, install the model: pip install 'sema-mcp[pii]' then python -m spacy download en_core_web_sm.",
+        });
+      }
+      if (this.controller.signal.aborted) {
+        view.webview.postMessage({ type: 'assistantEnd' });
+        this.controller = undefined;
+        return;
+      }
+    }
+
     view.webview.postMessage({ type: 'assistantStart' });
     const cfg = vscode.workspace.getConfiguration('sema');
     const maxTokens = cfg.get<number>('chat.maxTokens', 8192);
@@ -555,8 +598,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         semaBin: cfg.get<string>('binaryPath') || 'sema',
         effort: this.effort,
         model: this.modelId,
-        system: buildSystem(context, provider.readsWorkspace, this.mode),
-        messages: this.history,
+        system: buildSystem(outContext, provider.readsWorkspace, this.mode),
+        messages: outMessages,
         maxTokens,
         signal: this.controller.signal,
         sessionId: resumeId,
@@ -774,6 +817,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </select>
         <select id="effort" title="Reasoning effort"></select>
         <label id="indexswitch" class="switch" title="Use sema's semantic index as extra context (like Cursor's codebase context)"><span>index</span><input type="checkbox" id="indexchk"><span class="track"></span></label>
+        <label id="redactswitch" class="switch" title="Redact PII &amp; secrets (emails, API keys, names, locations…) before sending to the model"><span>redact</span><input type="checkbox" id="redactchk"><span class="track"></span></label>
         <button id="setkey" title="Set API key">Set key</button>
         <button id="loginbtn" title="Sign in to the selected CLI (Claude Code / Codex)">Log in</button>
       </div>
@@ -801,6 +845,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var indexChk = document.getElementById('indexchk');
     var useIndex = false;
     function applyIndexBtn(){ indexChk.checked = useIndex; }
+    var redactChk = document.getElementById('redactchk');
     var emptyEl = document.getElementById('empty');
     function hideEmpty(){ if (emptyEl){ emptyEl.style.display = 'none'; } }
     function autogrow(){ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; }
@@ -856,6 +901,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     modeSel.addEventListener('change', function(){ vscode.postMessage({type:'setMode', mode:modeSel.value}); });
     effortSel.addEventListener('change', function(){ vscode.postMessage({type:'setEffort', effort:effortSel.value}); });
     indexChk.addEventListener('change', function(){ useIndex = indexChk.checked; vscode.postMessage({type:'setIndex', value:useIndex}); });
+    redactChk.addEventListener('change', function(){ vscode.postMessage({type:'setRedact', value:redactChk.checked}); });
     setkeyBtn.addEventListener('click', function(){ vscode.postMessage({type:'setKey'}); });
     loginBtn.addEventListener('click', function(){ vscode.postMessage({type: loggedInState ? 'logout' : 'login'}); });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
@@ -875,6 +921,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         efforts.forEach(function(ef){ var o = document.createElement('option'); o.value = ef; o.textContent = ef === 'default' ? 'effort: default' : ('effort: ' + ef); if (ef === m.effort) o.selected = true; effortSel.appendChild(o); });
         effortSel.style.display = efforts.length > 1 ? '' : 'none';
         if (typeof m.useIndex === 'boolean'){ useIndex = m.useIndex; applyIndexBtn(); }
+        if (typeof m.redact === 'boolean'){ redactChk.checked = m.redact; }
         if (m.requiresKey) {
           setkeyBtn.style.display = '';
           setkeyBtn.textContent = m.hasKey ? 'Key set' : 'Set key';

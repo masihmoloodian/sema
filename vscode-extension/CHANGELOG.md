@@ -6,6 +6,13 @@ This project adheres to [Semantic Versioning](https://semver.org).
 ## [0.3.0]
 
 ### Added
+- **PII redaction mode (opt-in).** A new **redact** toggle scrubs sensitive data
+  from everything sent to the model — a fast, offline regex layer for secrets and
+  structured PII (emails, API keys/tokens, credit cards, SSNs, phone numbers), plus
+  an optional local spaCy NER pass (the `sema redact` command / `sema-mcp[pii]`
+  extra) for person and location names. Each turn shows what was redacted; it
+  covers the prompt and injected index context. Redaction that runs patterns-only
+  (model not installed) says so once.
 - **Redesigned chat panel — a Cursor/Claude-Code-style UX.** A branded header with
   the sema logo, a centered logo empty state, right-aligned user bubbles with plain
   flowing assistant text (tool activity inline), and a rounded composer with an

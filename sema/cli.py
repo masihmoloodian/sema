@@ -713,6 +713,37 @@ def remove(file: str, root: str, as_json: bool):
 
 
 @main.command()
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON: {redacted, text, entities} or an {error} payload")
+def redact(as_json: bool):
+    """Redact person/location names from text read on STDIN (spaCy NER).
+
+    Reads text from STDIN — never pass sensitive data as a CLI argument, where it
+    would leak into the process list and shell history. This is the model half of
+    the extension's hybrid PII redaction (structured PII / secrets are handled
+    client-side with regex). Requires the optional PII extra: `pip install
+    'sema-mcp[pii]'` plus `python -m spacy download en_core_web_sm`.
+    """
+    import sys
+    from .redact import redact_text, RedactionUnavailable
+
+    text = sys.stdin.read()
+    try:
+        result = redact_text(text)
+    except RedactionUnavailable as e:
+        # Degrade gracefully: report unavailability and echo the input unchanged so
+        # the caller can fall back to regex-only redaction.
+        if as_json:
+            _emit_json({"redacted": False, "error": "unavailable", "message": str(e), "text": text})
+            return
+        raise click.ClickException(str(e))
+
+    if as_json:
+        _emit_json({"redacted": True, **result})
+    else:
+        click.echo(result["text"])
+
+
+@main.command()
 @click.option("--verbose", "-v", is_flag=True, help="Show full details including MCP registration and binary paths.")
 @click.option("--json", "as_json", is_flag=True, help="Output status as JSON (for editors/scripts)")
 def status(verbose: bool, as_json: bool):

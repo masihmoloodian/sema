@@ -1,5 +1,33 @@
 # Claude Code setup
 
+## Install the Claude Code CLI
+
+sema's **Claude Code** provider drives the `claude` CLI, so install it first (skip
+if you already have it). It uses your Claude subscription — no API key.
+
+```bash
+# macOS / Linux (recommended)
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Homebrew (macOS / Linux)
+brew install --cask claude-code
+
+# Windows (PowerShell)
+irm https://claude.ai/install.ps1 | iex
+#   or:  winget install Anthropic.ClaudeCode
+```
+
+Then start it once and follow the browser sign-in:
+
+```bash
+claude            # first run walks you through sign-in
+claude --version  # verify
+```
+
+npm (`npm install -g @anthropic-ai/claude-code`, needs Node 18+) still works but is
+deprecated in favour of the installers above. Full setup and troubleshooting:
+<https://code.claude.com/docs/en/setup>.
+
 ## Step-by-step
 
 ```bash

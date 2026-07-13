@@ -4,6 +4,9 @@
 sema index .                                  Index the current directory (skips unchanged files)
 sema index . --reset                          Delete existing index and re-index everything from scratch
 sema index . --workspace my.code-workspace    Index only the folders listed in a VS Code workspace file
+sema add src/app.ts                           Add or re-index a single file (--json for scripts)
+sema remove src/app.ts                        Remove a file from the index — does not delete it on disk
+sema list                                     List indexed files and the symbols under each (--json for scripts)
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
 sema init --claude                            Register sema as MCP server with Claude Code (via claude mcp add -s user)
@@ -15,10 +18,12 @@ sema init --codex --uninstall                Remove sema from Codex config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10               Return more results
 sema search "query" --all-types               Include docs/config sections in results
+sema get symbolName                           Print the full source of a function/class/method by name
 sema reuse "what you're about to build"       Check if it already exists: reuse / review / safe-to-build verdict
 sema status                                   Show index stats and which project the MCP server is serving
 sema status --verbose                         Full details: index path, language breakdown, binary, registered command
 sema doctor                                   Diagnose installation and registration issues
+echo "text" | sema redact                     Redact names/locations from STDIN via spaCy NER (powers the extension's redact toggle)
 sema serve --project .                        Start MCP server for one project (called automatically by Claude Code or Codex)
 sema serve --root ~/code                       Start MCP server for every indexed project under ~/code (repeatable)
 ```

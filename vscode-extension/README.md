@@ -20,14 +20,14 @@ The extension shells out to the `sema` CLI (`--json` mode) for search and
 retrieval, and runs every provider from the extension host — so API keys never
 reach webview/page context.
 
-## Installation
+## Setup — step by step
 
-sema has two parts: the **sema CLI** (the local indexer this extension drives) and
-the **VS Code extension** itself. Install the CLI first.
+sema has two parts: the **sema CLI** (the local indexer the extension drives) and
+the **VS Code extension**. Set them up in order — it takes a few minutes.
 
 ### 1. Install the sema CLI
 
-The extension drives the `sema` CLI, so install it first:
+Always required — it's what makes chat codebase-aware (indexing, search, reuse).
 
 ```bash
 pip install sema-mcp        # or: uv tool install sema-mcp
@@ -49,52 +49,78 @@ sema --version
 
 Requires Python 3.11+. Full guide: [docs/installation.md](../docs/installation.md).
 
-> **If VS Code can't find `sema`:** apps launched from the Dock/Finder often don't
-> inherit your shell `PATH`. The reliable fix is to point the extension straight at the
-> binary — run `which sema` and set `sema.binaryPath` to that absolute path
-> (see [step 4](#4-first-run-setup)).
+### 2. Install the extension
 
-### 2. Chat prerequisites
+Install the packaged `sema-codebase-chat-<version>.vsix`:
 
-For the chat panel you need **at least one** of:
-- the **Claude Code** and/or **Codex** CLI installed and signed in (recommended — no
-  key management, and they can edit files in Agent mode). Not signed in yet? Just
-  click **Log in** in the panel — it runs the CLI's own browser sign-in. Or:
-- an **Anthropic**, **OpenAI**, **DeepSeek**, or **OpenRouter** API key (added from
-  the panel — stored in VS Code SecretStorage, never in settings).
+- **VS Code UI** — Extensions view (`⇧⌘X` / `Ctrl+Shift+X`) → the `⋯` menu →
+  **Install from VSIX…** → select the file.
+- **Command line** — `code --install-extension sema-codebase-chat-<version>.vsix`
+  (needs the `code` command; if it's missing, run *Shell Command: Install 'code'
+  command in PATH* first).
 
-### 3. Install the extension (`.vsix`)
+Reload when prompted — a **sema** icon appears in the Activity Bar. Don't have a
+`.vsix`? Build one — see [Build from source](#build-from-source).
 
-You install a packaged `sema-codebase-chat-<version>.vsix` file (e.g.
-`sema-codebase-chat-0.1.0.vsix`). Two ways:
+### 3. Open your project and build the index
 
-**From the VS Code UI**
-1. Open the **Extensions** view (`⇧⌘X` / `Ctrl+Shift+X`).
-2. Click the `⋯` menu at the top of the view → **Install from VSIX…**
-3. Select the `.vsix` file.
+1. **Open your project folder** (`File → Open Folder…`). sema indexes the open
+   folder; repo-reading providers use the enclosing git root.
+2. **If VS Code can't find `sema`** — common when the app is launched from the
+   Dock/Finder, which don't inherit your shell `PATH` — point it at the binary: run
+   `which sema` and set `sema.binaryPath` to that absolute path (see
+   [Configuration](#configuration)).
+3. **Build the index** — open the **sema** view → **Manage** → **Re-index** (or run
+   `sema index .`). The chat panel also offers to build it the first time you turn
+   the **index** toggle on.
 
-**From the command line** (needs the `code` command — in VS Code run
-*Shell Command: Install 'code' command in PATH* first if it's missing):
+### 4. Choose a chat provider
+
+You need **one** provider, and you can switch any time (even mid-conversation).
+Pick whichever path fits — **path A needs no extra install**:
+
+**A · Bring an API key** — the simplest path, nothing else to install.
+Choose **OpenRouter**, **OpenAI**, **DeepSeek**, or **Claude (Anthropic API)** in
+the panel → **Set key** → paste your key (stored in VS Code SecretStorage, never in
+settings). OpenRouter is a single gateway to models from many providers.
+
+**B · Reuse a local CLI** — no API key; uses your existing Claude/ChatGPT
+subscription. Install the CLI(s) you'll use (macOS/Linux shown; for Homebrew, npm,
+and Windows see [docs/claude-code.md](../docs/claude-code.md) and
+[docs/codex.md](../docs/codex.md)):
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash         # Claude Code
+curl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex
 ```
-code --install-extension sema-codebase-chat-0.1.0.vsix
+
+Then click **Log in** on that provider in the panel — it runs the CLI's own browser
+sign-in (`claude` / `codex`), reusing your subscription. You don't need both. If a
+CLI isn't on VS Code's PATH, set `sema.chat.claudePath` / `sema.chat.codexPath` to
+its absolute path.
+
+> **Claude Code and Codex are optional.** The API-key providers (path A) are a
+> complete alternative and require no CLI.
+
+### 5. Start chatting
+
+Open the **Chat** view, pick your provider, model, and a mode — **Ask** (read-only),
+**Plan** (propose a plan), or **Agent** (make changes) — and type. Toggle **index**
+on to feed sema's semantic context to the API providers, and **redact** on to strip
+PII/secrets before anything is sent.
+
+<details>
+<summary>Optional — redact person &amp; location names too</summary>
+
+The **redact** toggle catches secrets and structured PII (emails, API keys, cards,
+SSNs, phone numbers) out of the box. To also redact person and location **names**,
+install the local model:
+
+```bash
+pip install 'sema-mcp[pii]'
+python -m spacy download en_core_web_sm
 ```
-
-Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
-
-> Don't have a `.vsix`? Build one from source — see
-> [Build from source](#build-from-source) below.
-
-### 4. First-run setup
-
-1. **Open your project folder** (`File → Open Folder…`). sema works against the
-   open folder; chat providers that read the repo use the enclosing git root.
-2. **Point the extension at the sema binary** if VS Code can't find it on its `PATH`:
-   run `which sema` and set `sema.binaryPath` to that absolute path. See
-   [Configuration](#configuration).
-3. **Build the index.** Open the **sema** view → **Manage** → **Re-index**
-   (or run `sema index .` in a terminal). The chat panel can also build it
-   automatically the first time you turn the **index** toggle on.
-4. Open the **Chat** view, pick a provider/model, and start typing.
+</details>
 
 ## Features
 
@@ -108,6 +134,13 @@ Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
   **Log in** prompt appears. Each chat is one session; **New chat** starts a fresh
   one. Toggle **index** on to inject sema's semantic context (RAG) — useful for API
   providers, which can't read files themselves.
+- **PII redaction** — an opt-in **redact** toggle scrubs sensitive data from
+  everything sema sends to the model: regex for secrets and structured PII (emails,
+  API keys, tokens, credit cards, SSNs, phone numbers) instantly and offline, plus
+  an optional local spaCy NER pass for person and location names (`pip install
+  'sema-mcp[pii]'` then `python -m spacy download en_core_web_sm`). Each turn shows
+  what was redacted. Covers the prompt and injected index context; the local CLI
+  agents can still read raw files themselves.
 - **Manage** — index status, chunk/file counts, model, last-updated time, index
   path, the sema binary in use, Claude Code / Codex registration, a file **watch**
   toggle, and the current chat session's **token usage and estimated cost**. Plus
@@ -136,7 +169,7 @@ npm install
 npm run package      # → sema-codebase-chat-<version>.vsix (runs the esbuild bundle first)
 ```
 
-Then install the generated `.vsix` as in [step 3](#3-install-the-extension-vsix).
+Then install the generated `.vsix` as in [step 2](#2-install-the-extension).
 
 ### Develop
 
