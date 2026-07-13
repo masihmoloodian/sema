@@ -410,3 +410,117 @@ export class CodexProvider extends CliProvider {
     return null;
   }
 }
+
+/**
+ * opencode — `opencode run --format json`, a non-interactive agentic run that emits
+ * JSONL events (one per line: text / reasoning / tool_use / error, each carrying
+ * `sessionID`). `--auto` auto-approves permissions so a headless run never blocks;
+ * Agent mode uses the default `build` agent, Ask/Plan use the read-only `plan`
+ * agent. The model is a `provider/model` slug (`opencode models` lists them) and its
+ * provider must be signed in (`opencode auth login`) — though it ships free models
+ * that work with no auth. JSON mode reports no model id; tokens/cost come from the
+ * `step_finish` event.
+ */
+export class OpenCodeProvider extends CliProvider {
+  readonly id = 'opencode';
+  readonly label = 'opencode (local)';
+  readonly models = ['default'];
+  readonly defaultModel = 'default';
+  readonly efforts = ['default'];
+  readonly modelHint =
+    'provider/model — run `opencode models` (e.g. anthropic/claude-sonnet-4-6, openai/gpt-5, opencode/gpt-5.1-codex)';
+  readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'list'] };
+
+  protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
+    // --auto auto-approves permissions so a non-interactive run never hangs. Agent mode
+    // uses the full-capability `build` agent; Ask/Plan use the read-only `plan` agent.
+    const args = ['run', '--format', 'json', '--auto', '--agent', opts.agent ? 'build' : 'plan'];
+    if (opts.sessionId) {
+      args.push('--session', opts.sessionId);
+    }
+    if (opts.model && opts.model !== 'default') {
+      args.push('--model', opts.model);
+    }
+    // Fresh: system + full history. Resume: only the new user turn (the session holds the rest).
+    const prompt = opts.sessionId
+      ? opts.messages[opts.messages.length - 1]?.content ?? ''
+      : flattenPrompt(opts.system, opts.messages);
+    return { bin: 'opencode', args, prompt };
+  }
+
+  protected extractDelta(event: unknown): string | null {
+    const o = event as { type?: string; part?: { text?: string } };
+    // A "text" event carries a completed text part; parts don't overlap, so appending
+    // each part's full text reconstructs the answer without duplication.
+    return o?.type === 'text' ? o.part?.text ?? null : null;
+  }
+
+  protected extractThinking(event: unknown): string | null {
+    const o = event as { type?: string; part?: { text?: string } };
+    return o?.type === 'reasoning' ? o.part?.text ?? null : null;
+  }
+
+  protected extractActivities(event: unknown): Activity[] {
+    const o = event as {
+      type?: string;
+      part?: { id?: string; tool?: string; state?: { input?: Record<string, unknown> } };
+    };
+    if (o?.type === 'tool_use' && o.part?.tool) {
+      const input = o.part.state?.input ?? {};
+      const detail = String(
+        input.filePath ?? input.path ?? input.command ?? input.pattern ?? '',
+      ).slice(0, 60);
+      return [{ id: o.part.id, tool: o.part.tool, detail }];
+    }
+    return [];
+  }
+
+  protected extractSession(event: unknown): string | null {
+    const o = event as { sessionID?: string };
+    return typeof o?.sessionID === 'string' ? o.sessionID : null;
+  }
+
+  protected extractModel(): string | null {
+    // opencode's JSON stream doesn't report the model; the picker shows the selection.
+    return null;
+  }
+
+  protected extractUsage(event: unknown): TokenUsage | null {
+    const o = event as {
+      type?: string;
+      part?: {
+        cost?: number;
+        tokens?: {
+          input?: number;
+          output?: number;
+          reasoning?: number;
+          cache?: { read?: number; write?: number };
+        };
+      };
+    };
+    // opencode reports usage per step; the first step_finish covers a single-step turn.
+    if (o?.type === 'step_finish' && o.part?.tokens) {
+      const t = o.part.tokens;
+      const cacheRead = t.cache?.read ?? 0;
+      return {
+        inputTokens: (t.input ?? 0) + cacheRead + (t.cache?.write ?? 0),
+        outputTokens: (t.output ?? 0) + (t.reasoning ?? 0),
+        cachedInputTokens: cacheRead,
+        costUsd: typeof o.part.cost === 'number' ? o.part.cost : undefined,
+      };
+    }
+    return null;
+  }
+
+  protected checkError(event: unknown): string | null {
+    const o = event as { type?: string; error?: unknown };
+    if (o?.type !== 'error') {
+      return null;
+    }
+    const e = o.error as { data?: { message?: string }; message?: string } | string | undefined;
+    if (typeof e === 'string') {
+      return e;
+    }
+    return e?.data?.message ?? e?.message ?? 'opencode returned an error.';
+  }
+}

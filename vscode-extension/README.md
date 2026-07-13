@@ -2,11 +2,11 @@
 
 A UI for [sema](https://github.com/masihmoloodian/sema) — semantic code search,
 reuse checks, and a **codebase-aware chat panel**, right inside the editor. Chat
-with your code through seven providers:
+with your code through eight providers:
 
-- **Claude Code (local)** and **Codex (local)** — reuse the CLIs you already have
-  installed and logged in; no API key needed. They read (and, in Agent mode, edit)
-  your repository directly.
+- **Claude Code (local)**, **Codex (local)**, and **opencode (local)** — reuse the
+  CLIs you already have installed and logged in; no API key needed. They read (and, in
+  Agent mode, edit) your repository directly.
 - **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, **OpenRouter**, and
   **Together AI** — bring your own API key; sema retrieves the most relevant code and injects it as context
   (RAG). In **Agent** mode, the OpenAI-compatible providers (OpenAI, DeepSeek,
@@ -84,20 +84,26 @@ Choose **OpenRouter**, **OpenAI**, **DeepSeek**, **Together AI**, or **Claude (A
 the panel → **Set key** → paste your key (stored in VS Code SecretStorage, never in
 settings). OpenRouter is a single gateway to models from many providers.
 
-**B · Reuse a local CLI** — no API key; uses your existing Claude/ChatGPT
-subscription. Install the CLI(s) you'll use (macOS/Linux shown; for Homebrew, npm,
-and Windows see [docs/claude-code.md](../docs/claude-code.md) and
-[docs/codex.md](../docs/codex.md)):
+**B · Reuse a local CLI** — no key management in sema. Claude Code / Codex use your
+existing Claude/ChatGPT subscription; **opencode** is open-source and works with any
+provider you sign into. Install the CLI(s) you'll use (macOS/Linux shown; for
+Homebrew, npm, and Windows see [docs/claude-code.md](../docs/claude-code.md),
+[docs/codex.md](../docs/codex.md), and [docs/opencode.md](../docs/opencode.md)):
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash         # Claude Code
 curl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex
+curl -fsSL https://opencode.ai/install | bash          # opencode
 ```
 
-Then click **Log in** on that provider in the panel — it runs the CLI's own browser
-sign-in (`claude` / `codex`), reusing your subscription. You don't need both. If a
-CLI isn't on VS Code's PATH, set `sema.chat.claudePath` / `sema.chat.codexPath` to
-its absolute path.
+Then click **Log in** on that provider in the panel — it runs the CLI's own sign-in
+(`claude` / `codex login` / `opencode auth login`). Install only what you'll use. If a
+CLI isn't on VS Code's PATH, set `sema.chat.claudePath` / `sema.chat.codexPath` /
+`sema.chat.opencodePath` to its absolute path.
+
+> **opencode** also needs a model: it uses the default from your `opencode` config, or
+> pick a `provider/model` slug via the **"+ custom id…"** entry (run `opencode models`
+> to list yours).
 
 > **Claude Code and Codex are optional.** The API-key providers (path A) are a
 > complete alternative and require no CLI.

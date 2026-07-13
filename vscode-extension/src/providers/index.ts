@@ -1,4 +1,4 @@
-import { ClaudeCodeProvider, CodexProvider } from './cli';
+import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider } from './cli';
 import { AnthropicProvider } from './anthropic';
 import { openaiProvider } from './openai';
 import { deepseekProvider } from './deepseek';
@@ -13,6 +13,7 @@ export * from './types';
 export const PROVIDERS: ChatProvider[] = [
   new ClaudeCodeProvider(),
   new CodexProvider(),
+  new OpenCodeProvider(),
   new AnthropicProvider(),
   openaiProvider,
   deepseekProvider,

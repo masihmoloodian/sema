@@ -148,6 +148,11 @@
           "type": "string",
           "default": "codex",
           "description": "Path to the Codex CLI (the 'Codex (local)' provider). Set an absolute path if `codex` isn't on VS Code's PATH."
+        },
+        "sema.chat.opencodePath": {
+          "type": "string",
+          "default": "opencode",
+          "description": "Path to the opencode CLI (the 'opencode (local)' provider). Set an absolute path if `opencode` isn't on VS Code's PATH."
         }
       }
     }

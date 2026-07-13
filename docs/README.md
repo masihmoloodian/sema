@@ -6,6 +6,7 @@ Full documentation for sema. Start with the root [README](../README.md) for the 
 - [Installation](installation.md) — requirements, `pip install`, and install from source
 - [Claude Code setup](claude-code.md) — register sema, add `CLAUDE.md`
 - [OpenAI Codex setup](codex.md) — register sema, add `AGENTS.md`
+- [opencode setup](opencode.md) — install, use as a chat provider, add sema via MCP
 - [Working with multiple projects](multi-project.md) — serve many repos from one registration
 - [VS Code workspace setup](vscode-workspace.md) — multi-folder workspaces
 

@@ -18,7 +18,7 @@
 Sema builds one local semantic index of your codebase — every function, class, and method — and puts it to work two ways:
 
 - **🧠 Code intelligence for Claude Code & Codex.** An MCP server hands your CLI assistant semantic search (`search_code`), a reuse guard (`check_reuse`), and impact analysis, so it stops reading files blindly and stops rewriting helpers that already exist.
-- **🖥️ A Cursor-style AI panel in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs commands in your repo. Use the **Claude Code** and **Codex** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI** keys — switching **provider and model mid-conversation**, with the same index as context. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+- **🖥️ A Cursor-style AI panel in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs commands in your repo. Use the **Claude Code**, **Codex**, and **opencode** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI** keys — switching **provider and model mid-conversation**, with the same index as context. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
 The index runs fully offline — local SBERT embeddings, no API keys, no code leaves your machine. The chat/agent talks to whichever model you point it at.
 
@@ -42,7 +42,7 @@ Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=Mas
 
 ### The VS Code panel — a Cursor-style chat & agent
 
-- **💬 Seven providers, one conversation** — chat through **Claude Code**, **Codex**, **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI**, switching **provider and model between turns**.
+- **💬 Eight providers, one conversation** — chat through **Claude Code**, **Codex**, **opencode**, **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI**, switching **provider and model between turns**.
 - **🤖 Ask · Plan · Agent** — **Ask** answers read-only, **Plan** investigates with read-only tools and proposes a step-by-step plan, **Agent** does the work: a real tool loop — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so it reads, edits files, and runs commands. **Even API models (OpenRouter, OpenAI, DeepSeek, Together AI) act — not just the local CLIs.**
 - **🔎 Powered by your index** — the agent searches your sema index directly (`search_code` / `get_code`); an index toggle can also inject retrieved code as RAG context.
 - **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, live **token usage + estimated cost**, plus **Search** and **Reuse** from the command palette.
@@ -94,7 +94,7 @@ See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/archite
 
 Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. Chat through the **Claude Code** and **Codex** you already have installed (or your own API keys), switch **provider and model mid-session**, and let it act:
 
-- **💬 Seven providers, one conversation** — **Claude Code** and **Codex** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key; switch provider and model between turns.
+- **💬 Eight providers, one conversation** — **Claude Code**, **Codex**, and **opencode** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key; switch provider and model between turns.
 - **🤖 Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with read-only tools and propose a step-by-step plan, **Agent** to carry it out. In Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so **even API models (OpenRouter, OpenAI, DeepSeek, Together AI) read, edit files, and run commands**, not just the local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
 - **🔎 Index-aware** — the agent searches your sema index directly; an index toggle also injects retrieved code as RAG on demand.
 - **🧠 Reasoning-effort selector, streamed thinking + tool activity, per-session memory**, and the live **selected model id** — the model the API actually served, not what it claims to be.
@@ -110,7 +110,7 @@ Full docs live in [`docs/`](https://github.com/masihmoloodian/sema/blob/main/doc
 |---|---|
 | [Installation](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md) | Requirements, `pip install`, and install from source |
 | [sema for VS Code](https://github.com/masihmoloodian/sema/blob/main/vscode-extension/README.md) | sema's own VS Code extension — chat panel, search, reuse, and index management |
-| [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) · [Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md) · [VS Code workspace](https://github.com/masihmoloodian/sema/blob/main/docs/vscode-workspace.md) | Register sema with your assistant |
+| [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) · [Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md) · [opencode setup](https://github.com/masihmoloodian/sema/blob/main/docs/opencode.md) · [VS Code workspace](https://github.com/masihmoloodian/sema/blob/main/docs/vscode-workspace.md) | Register sema with your assistant |
 | [Working with multiple projects](https://github.com/masihmoloodian/sema/blob/main/docs/multi-project.md) | Serve many repos from one registration |
 | [CLI reference](https://github.com/masihmoloodian/sema/blob/main/docs/cli-reference.md) | Every `sema` command |
 | [MCP tools](https://github.com/masihmoloodian/sema/blob/main/docs/mcp-tools.md) | The tools your AI assistant calls |

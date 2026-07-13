@@ -38,6 +38,10 @@ This project adheres to [Semantic Versioning](https://semver.org).
     curated model list plus **"+ custom id…"** reaches the full catalogue.
   - **Together AI** — open models (Llama, DeepSeek, Qwen, gpt-oss, …) via `org/Model`
     slugs; cost **estimated** from public list prices. Curated list plus custom id.
+- **opencode as a local provider.** Chat and agent through the open-source `opencode`
+  CLI (`opencode run --format json`) alongside Claude Code and Codex. Ask/Plan use its
+  read-only `plan` agent, Agent uses `build` with auto-approved permissions; sign in
+  with `opencode auth login` and pick a `provider/model` (or your opencode default).
 - **Provider-aware custom model ids.** The **"+ custom id…"** entry (available for
   every provider) now shows format-specific examples — e.g. OpenRouter's
   `provider/model` slugs — so any model beyond the curated lists is easy to enter.

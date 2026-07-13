@@ -256,6 +256,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (provider.id === 'codex') {
       return cfg.get<string>('chat.codexPath') || 'codex';
     }
+    if (provider.id === 'opencode') {
+      return cfg.get<string>('chat.opencodePath') || 'opencode';
+    }
     return provider.id;
   }
 
@@ -583,6 +586,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       cliBin = cfg.get<string>('chat.claudePath');
     } else if (provider.id === 'codex') {
       cliBin = cfg.get<string>('chat.codexPath');
+    } else if (provider.id === 'opencode') {
+      cliBin = cfg.get<string>('chat.opencodePath');
     }
 
     // Resume the session only if it belongs to the current provider; otherwise start fresh.
