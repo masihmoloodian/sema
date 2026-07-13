@@ -3,6 +3,7 @@ import { AnthropicProvider } from './anthropic';
 import { openaiProvider } from './openai';
 import { deepseekProvider } from './deepseek';
 import { openrouterProvider } from './openrouter';
+import { togetherProvider } from './together';
 import { ChatProvider } from './types';
 
 export * from './types';
@@ -16,6 +17,7 @@ export const PROVIDERS: ChatProvider[] = [
   openaiProvider,
   deepseekProvider,
   openrouterProvider,
+  togetherProvider,
 ];
 
 export function getProvider(id: string | undefined): ChatProvider {

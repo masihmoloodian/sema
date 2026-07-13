@@ -2,15 +2,15 @@
 
 A UI for [sema](https://github.com/masihmoloodian/sema) — semantic code search,
 reuse checks, and a **codebase-aware chat panel**, right inside the editor. Chat
-with your code through six providers:
+with your code through seven providers:
 
 - **Claude Code (local)** and **Codex (local)** — reuse the CLIs you already have
   installed and logged in; no API key needed. They read (and, in Agent mode, edit)
   your repository directly.
-- **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, and **OpenRouter** — bring
-  your own API key; sema retrieves the most relevant code and injects it as context
+- **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, **OpenRouter**, and
+  **Together AI** — bring your own API key; sema retrieves the most relevant code and injects it as context
   (RAG). In **Agent** mode, the OpenAI-compatible providers (OpenAI, DeepSeek,
-  OpenRouter) also get file/command tools and carry out changes directly — creating
+  OpenRouter, Together AI) also get file/command tools and carry out changes directly — creating
   and editing files, running commands — not just describing them (function-calling
   models only). OpenRouter is a single gateway to models from many providers
   (Anthropic, OpenAI, Google, Meta, …) and reports the exact per-call cost; the
@@ -80,7 +80,7 @@ You need **one** provider, and you can switch any time (even mid-conversation).
 Pick whichever path fits — **path A needs no extra install**:
 
 **A · Bring an API key** — the simplest path, nothing else to install.
-Choose **OpenRouter**, **OpenAI**, **DeepSeek**, or **Claude (Anthropic API)** in
+Choose **OpenRouter**, **OpenAI**, **DeepSeek**, **Together AI**, or **Claude (Anthropic API)** in
 the panel → **Set key** → paste your key (stored in VS Code SecretStorage, never in
 settings). OpenRouter is a single gateway to models from many providers.
 
@@ -189,7 +189,7 @@ VS Code panels  ──CLI --json──►  sema (search / get / reuse / status) 
    │                                                                     (ChromaDB + SBERT)
    ├─ chat (local)  ──►  Claude Code / Codex CLI  ──stream──►  panel   (reads/edits repo)
    └─ chat (API)  ──context──►  Anthropic SDK · OpenAI SDK       ──stream──►  panel
-                                (OpenAI · DeepSeek · OpenRouter share the OpenAI SDK)
+                                (OpenAI · DeepSeek · OpenRouter · Together AI share the OpenAI SDK)
 ```
 
 Providers run in the Node extension host, so API keys never reach webview/page context.

@@ -28,14 +28,16 @@ This project adheres to [Semantic Versioning](https://semver.org).
   investigate the codebase before proposing a plan. Tool calls show as activity,
   file paths are confined to the workspace root, Plan mode refuses mutating tools,
   and the loop runs up to 50 steps. Requires a model that supports function calling.
-- **Two new chat providers: DeepSeek and OpenRouter.** Both are OpenAI-compatible,
-  so they share the existing OpenAI streaming transport — bring your own key (stored
-  in SecretStorage) and pick a model like any other API provider.
+- **Three new chat providers: DeepSeek, OpenRouter, and Together AI.** All are
+  OpenAI-compatible, so they share the existing OpenAI streaming transport — bring
+  your own key (stored in SecretStorage) and pick a model like any other API provider.
   - **DeepSeek** — `deepseek-v4-flash` / `deepseek-v4-pro`, with cache-aware cost
     **estimated** from public list prices.
   - **OpenRouter** — one gateway to models from many providers (`provider/model`
     slugs); usage carries the **real per-call cost**, shown as-is in Manage. The
     curated model list plus **"+ custom id…"** reaches the full catalogue.
+  - **Together AI** — open models (Llama, DeepSeek, Qwen, gpt-oss, …) via `org/Model`
+    slugs; cost **estimated** from public list prices. Curated list plus custom id.
 - **Provider-aware custom model ids.** The **"+ custom id…"** entry (available for
   every provider) now shows format-specific examples — e.g. OpenRouter's
   `provider/model` slugs — so any model beyond the curated lists is easy to enter.
