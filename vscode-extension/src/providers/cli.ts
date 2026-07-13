@@ -199,7 +199,10 @@ export class ClaudeCodeProvider extends CliProvider {
     if (opts.sessionId) {
       args.push('--resume', opts.sessionId);
     }
-    if (opts.agent) {
+    if (opts.plan) {
+      // Plan mode: explore read-only and present a plan; edits are blocked.
+      args.push('--permission-mode', 'plan');
+    } else if (opts.agent) {
       // Let it edit files; read-only otherwise (edits are denied non-interactively).
       args.push('--permission-mode', 'acceptEdits');
     }

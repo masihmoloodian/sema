@@ -31,6 +31,10 @@ export interface StreamOptions {
   cliBin?: string;
   /** Agent mode: let CLI providers edit files instead of answering read-only. */
   agent?: boolean;
+  /** Plan mode: investigate read-only and propose a step-by-step plan (no edits). */
+  plan?: boolean;
+  /** Path to the sema binary — enables the semantic search_code / get_code tools in agent/plan mode. */
+  semaBin?: string;
   /** Reasoning effort level ('default' = the CLI's own default). */
   effort?: string;
   /** Resume an existing CLI session (memory across turns); omit to start fresh. */
@@ -58,6 +62,8 @@ export interface ChatProvider {
   readonly secretKey?: string;
   /** Where the user obtains a key — only for key providers. */
   readonly keyHint?: string;
+  /** Example model id(s) shown in the custom-model-id prompt — hints the expected format. */
+  readonly modelHint?: string;
   /** CLI auth verbs (args for the provider's CLI). Absent for API-key providers. */
   readonly auth?: { login: string[]; logout: string[]; status: string[] };
   stream(opts: StreamOptions): Promise<void>;

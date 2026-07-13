@@ -34,6 +34,7 @@ export class AnthropicProvider implements ChatProvider {
   readonly readsWorkspace = false;
   readonly secretKey = 'sema.apiKey.anthropic';
   readonly keyHint = 'console.anthropic.com';
+  readonly modelHint = 'e.g. claude-opus-4-8, claude-sonnet-5, claude-fable-5';
 
   async stream(opts: StreamOptions): Promise<void> {
     const client = new Anthropic({ apiKey: opts.apiKey });

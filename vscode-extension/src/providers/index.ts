@@ -1,16 +1,21 @@
 import { ClaudeCodeProvider, CodexProvider } from './cli';
 import { AnthropicProvider } from './anthropic';
-import { OpenAIProvider } from './openai';
+import { openaiProvider } from './openai';
+import { deepseekProvider } from './deepseek';
+import { openrouterProvider } from './openrouter';
 import { ChatProvider } from './types';
 
 export * from './types';
 
 // Local CLI providers first — they reuse an existing login, so no key needed.
+// The key-based API providers follow.
 export const PROVIDERS: ChatProvider[] = [
   new ClaudeCodeProvider(),
   new CodexProvider(),
   new AnthropicProvider(),
-  new OpenAIProvider(),
+  openaiProvider,
+  deepseekProvider,
+  openrouterProvider,
 ];
 
 export function getProvider(id: string | undefined): ChatProvider {

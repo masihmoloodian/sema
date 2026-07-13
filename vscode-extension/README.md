@@ -2,13 +2,19 @@
 
 A UI for [sema](https://github.com/masihmoloodian/sema) — semantic code search,
 reuse checks, and a **codebase-aware chat panel**, right inside the editor. Chat
-with your code through four providers:
+with your code through six providers:
 
 - **Claude Code (local)** and **Codex (local)** — reuse the CLIs you already have
   installed and logged in; no API key needed. They read (and, in Agent mode, edit)
   your repository directly.
-- **Claude (Anthropic API)** and **OpenAI** — bring your own API key; sema
-  retrieves the most relevant code and injects it as context (RAG).
+- **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, and **OpenRouter** — bring
+  your own API key; sema retrieves the most relevant code and injects it as context
+  (RAG). In **Agent** mode, the OpenAI-compatible providers (OpenAI, DeepSeek,
+  OpenRouter) also get file/command tools and carry out changes directly — creating
+  and editing files, running commands — not just describing them (function-calling
+  models only). OpenRouter is a single gateway to models from many providers
+  (Anthropic, OpenAI, Google, Meta, …) and reports the exact per-call cost; the
+  others estimate cost from public list prices.
 
 The extension shells out to the `sema` CLI (`--json` mode) for search and
 retrieval, and runs every provider from the extension host — so API keys never
@@ -54,8 +60,8 @@ For the chat panel you need **at least one** of:
 - the **Claude Code** and/or **Codex** CLI installed and signed in (recommended — no
   key management, and they can edit files in Agent mode). Not signed in yet? Just
   click **Log in** in the panel — it runs the CLI's own browser sign-in. Or:
-- an **Anthropic** and/or **OpenAI** API key (added from the panel — stored in VS
-  Code SecretStorage, never in settings).
+- an **Anthropic**, **OpenAI**, **DeepSeek**, or **OpenRouter** API key (added from
+  the panel — stored in VS Code SecretStorage, never in settings).
 
 ### 3. Install the extension (`.vsix`)
 
@@ -93,7 +99,8 @@ Reload VS Code when prompted. A **sema** icon appears in the Activity Bar.
 ## Features
 
 - **Chat** — a Cursor-style panel with provider, model, and reasoning-**effort**
-  pickers, plus **Ask** (read-only) / **Agent** (can edit files) modes. Local CLI
+  pickers, plus **Ask** (read-only) / **Plan** (propose a plan) / **Agent** (take
+  actions) modes. Local CLI
   providers stream thinking and tool activity like their terminal apps do, and
   keep **per-session memory** across turns. A **Log in** button signs you into
   Claude Code / Codex from the panel (via each CLI's own browser flow) and shows
@@ -148,7 +155,8 @@ Development Host with the extension loaded. `npm run compile` typechecks;
 VS Code panels  ──CLI --json──►  sema (search / get / reuse / status)  ──►  index
    │                                                                     (ChromaDB + SBERT)
    ├─ chat (local)  ──►  Claude Code / Codex CLI  ──stream──►  panel   (reads/edits repo)
-   └─ chat (API)  ──context──►  Anthropic / OpenAI SDK          ──stream──►  panel
+   └─ chat (API)  ──context──►  Anthropic SDK · OpenAI SDK       ──stream──►  panel
+                                (OpenAI · DeepSeek · OpenRouter share the OpenAI SDK)
 ```
 
 Providers run in the Node extension host, so API keys never reach webview/page context.

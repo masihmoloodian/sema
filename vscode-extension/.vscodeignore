@@ -1,6 +1,9 @@
 .vscode/**
 .sema/**
 .codex/**
+docs/**
+media/chat-panel.html
+media/chat-panel.png
 src/**
 node_modules/**
 esbuild.js

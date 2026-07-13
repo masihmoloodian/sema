@@ -13,11 +13,14 @@
 
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](https://github.com/masihmoloodian/sema/blob/main/docs/faq.md#disclaimer).
 
-**Stop wasting tokens — on navigating your codebase, and on rewriting code that already exists. Speed up Claude Code and OpenAI Codex on large codebases.**
+**Semantic search over your codebase, a reuse guard that stops your AI reinventing code you already have — and a Cursor-style chat + agent that can actually change it. All local.**
 
-Sema is a semantic code indexer and MCP server. It indexes your entire codebase locally — every function, class, and method — and gives your AI assistant a search API so it never reads files blindly again, plus a reuse guard so it stops reinventing helpers you already have.
+Sema builds one local semantic index of your codebase — every function, class, and method — and puts it to work two ways:
 
-That same index also powers the **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** — a **Cursor-style chat panel** for your codebase. Talk to it through the **Claude Code** and **Codex** you already run locally (no re-login), or your own **Anthropic / OpenAI** API keys — switching **provider and model within a single conversation**, and toggling the index on to hand the chat exactly the code it needs.
+- **🧠 Code intelligence for Claude Code & Codex.** An MCP server hands your CLI assistant semantic search (`search_code`), a reuse guard (`check_reuse`), and impact analysis, so it stops reading files blindly and stops rewriting helpers that already exist.
+- **🖥️ A Cursor-style AI panel in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs commands in your repo. Use the **Claude Code** and **Codex** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter** keys — switching **provider and model mid-conversation**, with the same index as context. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+
+The index runs fully offline — local SBERT embeddings, no API keys, no code leaves your machine. The chat/agent talks to whichever model you point it at.
 
 Works with
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
@@ -25,16 +28,26 @@ Works with
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
 <a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
-Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a Cursor-style chat panel that talks to your codebase through the Claude Code and Codex you already run locally, or your own API keys.
+Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a Cursor-style **chat + agent** panel that reads, edits, and runs your codebase through the Claude Code and Codex you already run locally, or your own API keys.
 
 ## Features
 
+### The index — code intelligence for Claude Code & Codex (MCP)
+
 - **🔍 Semantic search** — `search_code()` finds code by meaning and returns signatures only (~150 tokens), never whole files.
-- **♻️ Reuse guard** — `check_reuse()` tells your assistant whether a function already exists *before* it writes a new one, so it reuses instead of reinventing. **98% reuse-vs-build accuracy** in a 50-example eval on real code.
+- **♻️ Reuse guard** — `check_reuse()` tells your assistant whether a function already exists *before* it writes a new one. **98% reuse-vs-build accuracy** in a 50-example eval on real code.
 - **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
-- **🧩 VS Code extension — a Cursor-style chat panel: chat with Claude Code / Codex / Anthropic / OpenAI, switching provider and model in one session, with the index as context — plus search, reuse, and index management.** [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+
+### The VS Code panel — a Cursor-style chat & agent
+
+- **💬 Six providers, one conversation** — chat through **Claude Code**, **Codex**, **Anthropic**, **OpenAI**, **DeepSeek**, and **OpenRouter**, switching **provider and model between turns**.
+- **🤖 Ask · Plan · Agent** — **Ask** answers read-only, **Plan** investigates with read-only tools and proposes a step-by-step plan, **Agent** does the work: a real tool loop — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so it reads, edits files, and runs commands. **Even API models (OpenRouter, OpenAI, DeepSeek) act — not just the local CLIs.**
+- **🔎 Powered by your index** — the agent searches your sema index directly (`search_code` / `get_code`); an index toggle can also inject retrieved code as RAG context.
+- **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, live **token usage + estimated cost**, plus **Search** and **Reuse** from the command palette.
+
+[Get the extension on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
 ## Why sema
 
@@ -79,13 +92,13 @@ See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/archite
 [![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?label=VS%20Code%20Marketplace&color=1e88e5&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/MasihMoloodian.sema-codebase-chat?color=1e88e5)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
-Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is on the VS Code Marketplace — a **Cursor-style chat panel** for your codebase, backed by the same local index. Chat through the **Claude Code** and **Codex** you already have installed (or your own API keys), and switch **provider and model mid-session**:
+Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. Chat through the **Claude Code** and **Codex** you already have installed (or your own API keys), switch **provider and model mid-session**, and let it act:
 
-- **💬 Chat with your code** through four providers — **Claude Code** and **Codex** running locally (reuse your existing login, no API key; they read the repo and, in Agent mode, edit it), or the **Anthropic** and **OpenAI** APIs with your own key.
-- **🧭 Ask / Agent modes**, a **reasoning-effort** selector, streamed thinking and tool activity, and **per-session memory** — just like the terminal apps, and prompts pass straight through (no wrapper persona).
-- **🔎 Semantic index toggle** — inject sema's retrieved context (RAG) on demand; the same `search_code` / `check_reuse` power the panel.
-- **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost** for the session.
-- **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
+- **💬 Six providers, one conversation** — **Claude Code** and **Codex** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, and **OpenRouter** APIs with your own key; switch provider and model between turns.
+- **🤖 Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with read-only tools and propose a step-by-step plan, **Agent** to carry it out. In Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so **even API models (OpenRouter, OpenAI, DeepSeek) read, edit files, and run commands**, not just the local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
+- **🔎 Index-aware** — the agent searches your sema index directly; an index toggle also injects retrieved code as RAG on demand.
+- **🧠 Reasoning-effort selector, streamed thinking + tool activity, per-session memory**, and the live **selected model id** — the model the API actually served, not what it claims to be.
+- **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost**. **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
 
 **Install:** search **"sema"** in the Extensions view, run `code --install-extension MasihMoloodian.sema-codebase-chat`, or open the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat). Prefer to build from source? See the [extension guide](https://github.com/masihmoloodian/sema/blob/main/vscode-extension/README.md#build-from-source).
 

@@ -1,49 +1,30 @@
-import OpenAI from 'openai';
-import { ChatProvider, StreamOptions } from './types';
+import { OpenAICompatibleProvider } from './openai-compatible';
 
-/** OpenAI via the official SDK, streaming chat completions. */
-export class OpenAIProvider implements ChatProvider {
-  readonly id = 'openai';
-  readonly label = 'OpenAI';
-  readonly models = ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'];
-  readonly defaultModel = 'gpt-4o';
-  readonly efforts = ['default'];
-  readonly requiresKey = true;
-  readonly readsWorkspace = false;
-  readonly secretKey = 'sema.apiKey.openai';
-  readonly keyHint = 'platform.openai.com';
-
-  async stream(opts: StreamOptions): Promise<void> {
-    const client = new OpenAI({ apiKey: opts.apiKey });
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: opts.system },
-      ...opts.messages.map((m) => ({ role: m.role, content: m.content })),
-    ];
-    const stream = await client.chat.completions.create(
-      {
-        model: opts.model,
-        max_tokens: opts.maxTokens,
-        messages,
-        stream: true,
-        stream_options: { include_usage: true },
-      },
-      { signal: opts.signal },
-    );
-    let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        opts.onDelta(delta);
-      }
-      if (chunk.usage) {
-        usage = chunk.usage;
-      }
-    }
-    if (opts.onUsage && usage) {
-      opts.onUsage({
-        inputTokens: usage.prompt_tokens ?? 0,
-        outputTokens: usage.completion_tokens ?? 0,
-      });
-    }
-  }
-}
+/**
+ * OpenAI via the official SDK — the OpenAI-compatible base with no baseURL
+ * override (the SDK points at api.openai.com by default). Models track the
+ * current GPT-5.6 family (Sol = flagship, Terra = balanced, Luna = cost-efficient;
+ * `gpt-5.6` is an alias for Sol). Cost is estimated from public list prices ($/1M
+ * tokens); unknown models get no estimate, and "+ custom id…" reaches any other
+ * model (e.g. gpt-5.5, gpt-5.4-mini).
+ */
+export const openaiProvider = new OpenAICompatibleProvider({
+  id: 'openai',
+  label: 'OpenAI',
+  secretKey: 'sema.apiKey.openai',
+  keyHint: 'platform.openai.com',
+  modelHint: 'e.g. gpt-5.6, gpt-5.5-pro, gpt-5.4-mini',
+  models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+  defaultModel: 'gpt-5.6-sol',
+  prices: {
+    'gpt-5.6-sol': { in: 5, cachedIn: 0.5, out: 30 },
+    'gpt-5.6': { in: 5, cachedIn: 0.5, out: 30 }, // alias for gpt-5.6-sol
+    'gpt-5.6-terra': { in: 2.5, cachedIn: 0.25, out: 15 },
+    'gpt-5.6-luna': { in: 1, cachedIn: 0.1, out: 6 },
+    'gpt-5.5': { in: 5, cachedIn: 0.5, out: 30 },
+    'gpt-5.5-pro': { in: 30, out: 180 },
+    'gpt-5.4': { in: 2.5, cachedIn: 0.25, out: 15 },
+    'gpt-5.4-mini': { in: 0.75, cachedIn: 0.075, out: 4.5 },
+    'gpt-5.4-nano': { in: 0.2, cachedIn: 0.02, out: 1.25 },
+  },
+});

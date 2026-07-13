@@ -570,6 +570,148 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
     })
 
 
+def _open_index(index_root: Path):
+    """Open the store for a project root, or None if no index exists there."""
+    from .store.chroma import SemaStore
+    index_path = index_root / DEFAULT_INDEX_DIR
+    if not index_path.exists():
+        return None
+    return SemaStore(index_path)
+
+
+def _refresh_meta(index_root: Path, store) -> None:
+    """Rewrite meta.json counts + timestamp after an incremental add/remove."""
+    import datetime
+    meta_path = index_root / DEFAULT_META_FILE
+    try:
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    except Exception:
+        meta = {}
+    all_meta = store.get_all_metadata()
+    meta["chunk_count"] = len(all_meta)
+    meta["file_count"] = len({m.get("file", "") for m in all_meta if m.get("file")})
+    meta["indexed_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    meta.setdefault("model", "all-MiniLM-L6-v2")
+    meta.setdefault("version", "1")
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
+@main.command(name="list")
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON (for editors/scripts)")
+def list_cmd(path: str, as_json: bool):
+    """List indexed files and the symbols under each (a map of the index)."""
+    index_root = Path(path).resolve()
+    store = _open_index(index_root)
+    if store is None:
+        if as_json:
+            _emit_json({"files": [], "chunk_count": 0, "file_count": 0})
+        else:
+            console.print("[yellow]No index found[/yellow] — run [bold]sema index .[/bold]")
+        return
+
+    by_file: dict[str, dict] = {}
+    for m in store.get_all_metadata():
+        f = m.get("file", "")
+        if not f:
+            continue
+        entry = by_file.setdefault(f, {"file": f, "language": m.get("language", ""), "chunks": []})
+        entry["chunks"].append({
+            "name": m.get("name", ""),
+            "type": m.get("chunk_type", ""),
+            "start_line": m.get("start_line", 0),
+            "end_line": m.get("end_line", 0),
+            "signature": m.get("signature", ""),
+        })
+    files = sorted(by_file.values(), key=lambda e: e["file"])
+    for e in files:
+        e["chunks"].sort(key=lambda s: s["start_line"])
+
+    if as_json:
+        _emit_json({
+            "files": files,
+            "chunk_count": sum(len(e["chunks"]) for e in files),
+            "file_count": len(files),
+        })
+    else:
+        for e in files:
+            console.print(f"[bold]{e['file']}[/bold] [dim]({len(e['chunks'])})[/dim]")
+            for c in e["chunks"]:
+                console.print(f"    [dim]{c['type']}[/dim] {c['name']}  [dim]:{c['start_line']}[/dim]")
+
+
+@main.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--root", default=".", type=click.Path(exists=True), help="Project root that owns the index")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON (for editors/scripts)")
+def add(file: str, root: str, as_json: bool):
+    """Add or re-index a single file in the index."""
+    from .indexer.chunker import index_file
+    from .indexer.embedder import Embedder
+    from .store.chroma import SemaStore
+    from .store.hashes import FileHashStore
+
+    index_root = Path(root).resolve()
+    file_path = Path(file).resolve()
+    try:
+        rel = str(file_path.relative_to(index_root))
+    except ValueError:
+        msg = f"{file_path} is not inside {index_root}"
+        if as_json:
+            _emit_json({"ok": False, "error": msg})
+        else:
+            console.print(f"[red]✗[/red] {msg}")
+        return
+
+    index_path = index_root / DEFAULT_INDEX_DIR
+    store = SemaStore(index_path)
+    embedder = Embedder()
+    hash_store = FileHashStore(index_path.parent)
+    n = index_file(file_path, index_root, store, embedder, base_root=index_root, hash_store=hash_store)
+    _refresh_meta(index_root, store)
+    if as_json:
+        _emit_json({"ok": True, "file": rel, "chunks": n})
+    else:
+        console.print(f"[green]✔[/green] Indexed [bold]{rel}[/bold] — {n} chunks")
+
+
+@main.command()
+@click.argument("file")
+@click.option("--root", default=".", type=click.Path(exists=True), help="Project root that owns the index")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON (for editors/scripts)")
+def remove(file: str, root: str, as_json: bool):
+    """Remove a file from the index (does not delete the file on disk)."""
+    from .store.hashes import FileHashStore
+
+    index_root = Path(root).resolve()
+    # Accept either the stored relative path or a real/absolute path under root.
+    p = Path(file)
+    rel = file
+    if p.is_absolute() or p.exists():
+        try:
+            rel = str(p.resolve().relative_to(index_root))
+        except ValueError:
+            rel = file
+
+    store = _open_index(index_root)
+    if store is None:
+        if as_json:
+            _emit_json({"ok": False, "error": "no index"})
+        else:
+            console.print("[yellow]No index found[/yellow]")
+        return
+    store.delete_by_file(rel)
+    hash_store = FileHashStore((index_root / DEFAULT_INDEX_DIR).parent)  # the .sema dir
+    hash_store.remove(rel)
+    hash_store.save()
+    _refresh_meta(index_root, store)
+    if as_json:
+        _emit_json({"ok": True, "file": rel})
+    else:
+        console.print(f"[green]✔[/green] Removed [bold]{rel}[/bold] from the index")
+
+
 @main.command()
 @click.option("--verbose", "-v", is_flag=True, help="Show full details including MCP registration and binary paths.")
 @click.option("--json", "as_json", is_flag=True, help="Output status as JSON (for editors/scripts)")

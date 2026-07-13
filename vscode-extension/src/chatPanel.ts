@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { SemaClient, SessionUsage } from './semaClient';
+import * as path from 'path';
+import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
 import { ChatProvider, TokenUsage } from './providers/types';
 
@@ -19,24 +20,61 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '\n… (truncated)' : s;
 }
 
-function buildSystem(context: string, readsWorkspace: boolean): string {
+const PLAN_NOTE =
+  'You are in plan mode. Investigate the problem and produce a concise, step-by-step ' +
+  'implementation plan — the files to change, the approach, and the order of the steps. Do ' +
+  'NOT edit files or write the full implementation; output the plan only, then stop.';
+
+function buildSystem(context: string, readsWorkspace: boolean, mode: string): string {
+  const plan = mode === 'plan';
   // CLI agents (Claude Code / Codex) run under their own system prompt and read the repo
   // themselves, and Ask/Agent is enforced by CLI flags — not by wording. So impose no
-  // persona: a plain "hi" gets a plain reply, exactly like their terminal apps. Only pass
-  // the retrieved context when the index is on.
+  // persona (a plain "hi" gets a plain reply) except a plan directive in Plan mode. Only
+  // pass the retrieved context when the index is on.
   if (readsWorkspace) {
-    return context
-      ? [
-          "Relevant code from sema's semantic index (a starting point — read more files if needed):",
-          '',
-          context,
-        ].join('\n')
-      : '';
+    const parts: string[] = [];
+    if (plan) {
+      parts.push(PLAN_NOTE, '');
+    }
+    if (context) {
+      parts.push(
+        "Relevant code from sema's semantic index (a starting point — read more files if needed):",
+        '',
+        context,
+      );
+    }
+    return parts.join('\n').trim();
   }
 
-  // API providers are bare models: give them a short role plus the retrieved code (RAG),
-  // since they cannot read files themselves.
-  const lines = ['You are a coding assistant. Answer the user directly and concisely.'];
+  // API providers are bare models. In Agent mode sema hands them workspace tools (see
+  // providers/tools.ts) and runs the tool loop, so tell them to act; otherwise give a short
+  // role plus the retrieved code (RAG), since they can't read files themselves.
+  const agent = mode === 'agent';
+  let lines: string[];
+  if (agent) {
+    lines = [
+      "You are a coding agent working directly in the user's workspace through tools. Available " +
+        'tools: search_code (semantic search of the codebase — usually the best first step), ' +
+        "get_code (fetch a symbol's full source), grep (regex text search), glob (find files by " +
+        'pattern), list_directory, read_file, write_file, edit_file (surgical string replacement — ' +
+        'prefer it over rewriting whole files), delete_file, and run_command (shell: builds, tests, ' +
+        'git, scaffolding). When the request is a task that inspects or changes the project, use ' +
+        'tools to actually do it — explore first (search_code / grep / read_file), then change ' +
+        '(edit_file / write_file), then verify (run_command) — instead of only describing the ' +
+        'steps, and briefly summarize what you changed when done. For greetings, small talk, or ' +
+        'questions that do not require the workspace, reply directly and do NOT call any tool.',
+    ];
+  } else if (plan) {
+    lines = [
+      'You are a coding assistant in plan mode. You have read-only tools — search_code, get_code, ' +
+        'grep, glob, list_directory, read_file — to investigate the codebase before planning; use ' +
+        'them to ground your plan in the actual code. For a greeting or a message that is not a ' +
+        'task to plan, reply briefly without using any tool. ' +
+        PLAN_NOTE,
+    ];
+  } else {
+    lines = ['You are a coding assistant. Answer the user directly and concisely.'];
+  }
   if (context) {
     lines.push('', 'Use the retrieved code below (you cannot read files directly):', '', context);
   } else {
@@ -47,6 +85,20 @@ function buildSystem(context: string, readsWorkspace: boolean): string {
     );
   }
   return lines.join('\n');
+}
+
+/** Turn a provider/SDK error into a user-facing message; explain common rate limits (429). */
+function describeError(err: unknown): string {
+  const status = (err as { status?: number }).status;
+  const raw = (err as Error).message || 'Request failed.';
+  if (status === 429 || /\b429\b/.test(raw)) {
+    return (
+      'Rate limited (429): the provider throttled this request. Wait a few seconds and try again. ' +
+      'Free “:free” OpenRouter models share very tight per-minute/day limits — if it keeps ' +
+      'happening, switch to a paid model id (drop the “:free” suffix) or add credits.'
+    );
+  }
+  return raw;
 }
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -350,10 +402,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.context.globalState.update(EFFORT_KEY, String(msg.effort));
         break;
       case 'customModel': {
+        const cmProvider = getProvider(this.providerId);
+        const example =
+          cmProvider.modelHint ??
+          cmProvider.models.find((m) => m !== 'default') ??
+          cmProvider.models[0] ??
+          'model id';
         const entered = await vscode.window.showInputBox({
-          title: 'Custom model id',
-          prompt: `Enter a model id for ${getProvider(this.providerId).label}`,
-          placeHolder: 'e.g. gpt-5.5 or claude-opus-4-8',
+          title: `Custom model id — ${cmProvider.label}`,
+          prompt: `Enter any ${cmProvider.label} model id — it's added to this provider's model list.`,
+          placeHolder: example,
           ignoreFocusOut: true,
         });
         if (entered && entered.trim()) {
@@ -382,6 +440,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'clear':
         this.clearConversation();
+        break;
+      case 'openFile':
+        await this.openFile(String(msg.file ?? ''), Number(msg.line) || 1);
         break;
     }
   }
@@ -446,7 +507,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this.useIndex) {
       view.webview.postMessage({ type: 'status', text: 'searching sema index…' });
       const client = this.makeClient();
-      context = client ? await this.buildContext(text, client) : '';
+      if (client) {
+        const retrieved = await this.buildContext(text, client);
+        context = retrieved.text;
+        if (retrieved.items.length) {
+          // Show the user exactly what sema pulled into context (clickable to open).
+          view.webview.postMessage({
+            type: 'context',
+            items: retrieved.items.map((r) => ({
+              file: r.file,
+              name: r.name,
+              type: r.type,
+              line: r.start_line,
+            })),
+          });
+        }
+      }
       if (this.controller.signal.aborted) {
         view.webview.postMessage({ type: 'assistantEnd' });
         this.controller = undefined;
@@ -458,6 +534,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration('sema');
     const maxTokens = cfg.get<number>('chat.maxTokens', 8192);
     const agent = this.mode === 'agent';
+    const plan = this.mode === 'plan';
     let cliBin: string | undefined;
     if (provider.id === 'claude-code') {
       cliBin = cfg.get<string>('chat.claudePath');
@@ -474,9 +551,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         cwd: this.repoRoot,
         cliBin,
         agent,
+        plan,
+        semaBin: cfg.get<string>('binaryPath') || 'sema',
         effort: this.effort,
         model: this.modelId,
-        system: buildSystem(context, provider.readsWorkspace),
+        system: buildSystem(context, provider.readsWorkspace, this.mode),
         messages: this.history,
         maxTokens,
         signal: this.controller.signal,
@@ -510,12 +589,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.history.pop();
         this.sessionId = undefined;
         this.sessionProvider = undefined;
-        const message = (err as Error).message;
-        view.webview.postMessage({ type: 'error', message });
+        const raw = (err as Error).message;
+        view.webview.postMessage({ type: 'error', message: describeError(err) });
         // Not signed in? Offer a one-click login for the CLI providers.
         if (
           provider.auth &&
-          /not logged in|please run.*\/login|\/login|not authenticated|unauthorized/i.test(message)
+          /not logged in|please run.*\/login|\/login|not authenticated|unauthorized/i.test(raw)
         ) {
           void this.refreshAuthState();
           const pick = await vscode.window.showWarningMessage(
@@ -534,15 +613,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Retrieve relevant code via sema and format it as prompt context. */
-  private async buildContext(query: string, client: SemaClient): Promise<string> {
-    let results;
+  private async buildContext(
+    query: string,
+    client: SemaClient,
+  ): Promise<{ text: string; items: SearchResult[] }> {
+    let results: SearchResult[];
     try {
       results = await client.search(query, 8);
     } catch {
-      return '';
+      return { text: '', items: [] };
     }
     if (!results.length) {
-      return '';
+      return { text: '', items: [] };
     }
 
     const parts: string[] = ['Relevant code from this repository (retrieved by sema):', ''];
@@ -568,7 +650,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         parts.push(`- ${r.file}:${r.start_line} — ${r.type} ${r.name}: ${r.signature}`);
       }
     }
-    return parts.join('\n');
+    return { text: parts.join('\n'), items: results };
+  }
+
+  /** Open a retrieved file in the editor at the given 1-based line. */
+  private async openFile(file: string, line: number): Promise<void> {
+    if (!file) {
+      return;
+    }
+    try {
+      const abs = path.isAbsolute(file) ? file : path.join(this.repoRoot || '', file);
+      const doc = await vscode.workspace.openTextDocument(abs);
+      const pos = new vscode.Position(Math.max(0, line - 1), 0);
+      await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos) });
+    } catch (e) {
+      vscode.window.showErrorMessage(`sema: could not open ${file}: ${(e as Error).message}`);
+    }
   }
 
   // ── webview html ──────────────────────────────────────────────────────────
@@ -583,58 +680,105 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
+  * { box-sizing: border-box; }
   body { margin: 0; padding: 0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); display: flex; flex-direction: column; height: 100vh; }
-  #bar { display: flex; gap: 4px; align-items: center; padding: 6px; border-bottom: 1px solid var(--vscode-panel-border); flex-wrap: wrap; }
-  #bar select, #bar button { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px; padding: 2px 6px; font-size: 12px; }
-  #bar button { cursor: pointer; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; }
-  #bar button.warn { color: var(--vscode-editorWarning-foreground); }
-  #bar button.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
-  #modelinfo { font-size: 11px; color: var(--vscode-descriptionForeground); align-self: center; }
-  #messages { flex: 1; overflow-y: auto; padding: 8px; }
-  .msg { margin-bottom: 10px; }
-  .msg .bubble { padding: 8px 10px; border-radius: 8px; white-space: normal; word-wrap: break-word; }
-  .msg.user .bubble { background: var(--vscode-textBlockQuote-background); border: 1px solid var(--vscode-panel-border); }
-  .msg.assistant .bubble { background: var(--vscode-editor-inactiveSelectionBackground); }
+
+  #header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-panel-border); }
+  #brand { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  #brand svg { width: 18px; height: 18px; color: var(--vscode-textLink-foreground); }
+  #brand .name { font-size: 13px; letter-spacing: .3px; }
+  #modelinfo { flex: 1; text-align: right; font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--vscode-foreground); cursor: pointer; opacity: .75; flex: none; }
+  .iconbtn:hover { background: var(--vscode-list-hoverBackground); opacity: 1; }
+
+  #chatarea { position: relative; flex: 1; overflow: hidden; }
+  #messages { position: absolute; inset: 0; overflow-y: auto; padding: 12px; }
+  #empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; pointer-events: none; }
+  #empty .logo { color: var(--vscode-textLink-foreground); opacity: .9; line-height: 0; }
+  #empty .logo svg { width: 46px; height: 46px; }
+  #empty .title { font-size: 18px; font-weight: 600; letter-spacing: .4px; }
+  #empty .sub { font-size: 12px; color: var(--vscode-descriptionForeground); max-width: 280px; line-height: 1.55; }
+
+  .msg { margin-bottom: 12px; }
+  .msg .bubble { padding: 9px 12px; border-radius: 10px; white-space: normal; word-wrap: break-word; line-height: 1.5; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user .bubble { background: var(--vscode-textBlockQuote-background); border: 1px solid var(--vscode-panel-border); max-width: 88%; }
+  .msg.assistant .bubble { background: transparent; padding-left: 2px; padding-right: 2px; }
   .msg.error .bubble { background: var(--vscode-inputValidation-errorBackground); border: 1px solid var(--vscode-inputValidation-errorBorder); }
-  pre { background: var(--vscode-textCodeBlock-background); padding: 8px; border-radius: 6px; overflow-x: auto; }
+  pre { background: var(--vscode-textCodeBlock-background); padding: 8px 10px; border-radius: 8px; overflow-x: auto; border: 1px solid var(--vscode-panel-border); }
   code { font-family: var(--vscode-editor-font-family); font-size: 12px; }
   .typing span { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--vscode-descriptionForeground); animation: sema-blink 1.2s infinite both; }
   .typing span:nth-child(2) { animation-delay: .2s; }
   .typing span:nth-child(3) { animation-delay: .4s; }
   @keyframes sema-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-  .trace { margin-bottom: 4px; }
+  .trace { margin-bottom: 6px; }
   .act { font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); padding: 1px 0; }
-  details.think { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+  details.ctx { font-size: 11px; color: var(--vscode-descriptionForeground); margin: 0 0 12px; background: var(--vscode-textBlockQuote-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 6px 10px; }
+  details.ctx summary { cursor: pointer; user-select: none; }
+  .ctx-body { padding: 6px 0 2px; }
+  .ctx-item { font-family: var(--vscode-editor-font-family); padding: 2px 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ctx-item:hover { color: var(--vscode-textLink-foreground); text-decoration: underline; }
+  details.think { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 6px; }
   details.think summary { cursor: pointer; user-select: none; }
   .think-body { white-space: pre-wrap; font-style: italic; opacity: .85; padding: 4px 0 4px 10px; }
-  #status { padding: 0 8px; height: 14px; font-size: 11px; color: var(--vscode-descriptionForeground); }
   .notice { text-align: center; font-size: 11px; color: var(--vscode-descriptionForeground); padding: 4px 0; }
-  #composer { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--vscode-panel-border); align-items: flex-end; }
-  #input { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px; padding: 6px; font-family: inherit; }
-  #send { width: 28px; height: 28px; min-width: 28px; padding: 0; border: none; border-radius: 50%; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  #status { padding: 2px 12px; min-height: 14px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+
+  #composer { margin: 0 10px 10px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  #composer:focus-within { border-color: var(--vscode-focusBorder); }
+  #input { resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; padding: 2px 4px; font-family: inherit; font-size: var(--vscode-font-size); line-height: 1.5; max-height: 160px; overflow-y: auto; }
+  #toolbar { display: flex; align-items: center; gap: 6px; }
+  #controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  #controls select { background: transparent; color: var(--vscode-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; padding: 3px 6px; font-size: 11.5px; cursor: pointer; max-width: 160px; }
+  #controls select:hover { border-color: var(--vscode-focusBorder); }
+  #controls button { background: transparent; color: var(--vscode-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; padding: 3px 8px; font-size: 11.5px; cursor: pointer; }
+  #controls button:hover { border-color: var(--vscode-focusBorder); }
+  #controls button.warn { color: var(--vscode-editorWarning-foreground); border-color: var(--vscode-editorWarning-foreground); }
+  #controls button.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+  #send { width: 30px; height: 30px; min-width: 30px; padding: 0; border: none; border-radius: 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
   #send:hover { background: var(--vscode-button-hoverBackground); }
+  .switch { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; font-size: 11.5px; color: var(--vscode-foreground); }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { position: relative; width: 26px; height: 15px; border-radius: 999px; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); transition: background .15s, border-color .15s; flex: none; }
+  .switch .track::after { content: ''; position: absolute; top: 1px; left: 1px; width: 11px; height: 11px; border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform .15s, background .15s; }
+  .switch input:checked + .track { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
+  .switch input:checked + .track::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
+  .switch input:focus-visible + .track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 </style>
 </head>
 <body>
-  <div id="bar">
-    <select id="provider" title="Provider"></select>
-    <select id="model" title="Model"></select>
-    <select id="mode" title="Ask = read-only Q&amp;A · Agent = can edit files">
-      <option value="ask">Ask</option>
-      <option value="agent">Agent</option>
-    </select>
-    <select id="effort" title="Reasoning effort"></select>
-    <button id="indexbtn" title="Use sema's semantic index as extra context (like Cursor's codebase context)">index: off</button>
-    <button id="setkey" title="Set API key">Set key</button>
-    <button id="loginbtn" title="Sign in to the selected CLI (Claude Code / Codex)">Log in</button>
-    <button id="clear" title="Start a new chat (new session)">New chat</button>
-    <span id="modelinfo" title="Model used for this chat"></span>
+  <div id="header">
+    <span id="brand"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg><span class="name">sema</span></span>
+    <span id="modelinfo" title="Selected model id (→ marks the model a local CLI actually used)"></span>
+    <button id="clear" class="iconbtn" title="New chat (new session)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
   </div>
-  <div id="messages"></div>
+  <div id="chatarea">
+    <div id="messages"></div>
+    <div id="empty">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg></div>
+      <div class="title">sema</div>
+      <div class="sub">Chat with your codebase. Pick a provider below, then <b>Ask</b> a question, let it <b>Plan</b>, or switch to <b>Agent</b> to make changes.</div>
+    </div>
+  </div>
   <div id="status"></div>
   <div id="composer">
-    <textarea id="input" rows="2" placeholder="Ask about your codebase… (Enter to send, Shift+Enter for newline)"></textarea>
-    <button id="send" title="Send"></button>
+    <textarea id="input" rows="1" placeholder="Ask about your codebase…   (Enter to send · Shift+Enter for newline)"></textarea>
+    <div id="toolbar">
+      <div id="controls">
+        <select id="provider" title="Provider"></select>
+        <select id="model" title="Model"></select>
+        <select id="mode" title="Ask = read-only Q&amp;A · Plan = propose a plan (no edits) · Agent = make changes">
+          <option value="ask">Ask</option>
+          <option value="plan">Plan</option>
+          <option value="agent">Agent</option>
+        </select>
+        <select id="effort" title="Reasoning effort"></select>
+        <label id="indexswitch" class="switch" title="Use sema's semantic index as extra context (like Cursor's codebase context)"><span>index</span><input type="checkbox" id="indexchk"><span class="track"></span></label>
+        <button id="setkey" title="Set API key">Set key</button>
+        <button id="loginbtn" title="Sign in to the selected CLI (Claude Code / Codex)">Log in</button>
+      </div>
+      <button id="send" title="Send"></button>
+    </div>
   </div>
   <script nonce="${nonce}">
   (function(){
@@ -651,9 +795,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var loginBtn = document.getElementById('loginbtn');
     var loggedInState = false;
     var modelInfo = document.getElementById('modelinfo');
-    var indexBtn = document.getElementById('indexbtn');
+    var curDefaults = {}, curProvider = '';
+    function modelIdOf(model){ if (!model || model === '__custom__') return ''; if (model === 'default' && curDefaults[curProvider]) return curDefaults[curProvider]; return model; }
+    function showSelectedModel(model){ modelInfo.textContent = modelIdOf(model); }
+    var indexChk = document.getElementById('indexchk');
     var useIndex = false;
-    function applyIndexBtn(){ indexBtn.textContent = useIndex ? 'index: on' : 'index: off'; indexBtn.className = useIndex ? 'ok' : ''; }
+    function applyIndexBtn(){ indexChk.checked = useIndex; }
+    var emptyEl = document.getElementById('empty');
+    function hideEmpty(){ if (emptyEl){ emptyEl.style.display = 'none'; } }
+    function autogrow(){ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; }
     var streaming = false, curEl = null, answerEl = null, traceEl = null, answerRaw = '', thinkBody = null, started = false, shownLen = 0, revealTimer = null;
     function ensureStructure(){ if (started) return; started = true; curEl.innerHTML = ''; traceEl = document.createElement('div'); traceEl.className = 'trace'; answerEl = document.createElement('div'); answerEl.className = 'answer'; curEl.appendChild(traceEl); curEl.appendChild(answerEl); }
     // Smoothing buffer: reveal received text at a steady pace that catches up fast (no fake delay).
@@ -695,16 +845,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     function doSend(){
       if (streaming){ vscode.postMessage({type:'stop'}); return; }
       var text = input.value.trim(); if (!text) return;
-      input.value = ''; setStreaming(true); vscode.postMessage({type:'send', text:text});
+      input.value = ''; autogrow(); setStreaming(true); vscode.postMessage({type:'send', text:text});
     }
 
     sendBtn.addEventListener('click', doSend);
     input.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } });
-    providerSel.addEventListener('change', function(){ modelInfo.textContent=''; vscode.postMessage({type:'setProvider', provider:providerSel.value}); });
-    modelSel.addEventListener('change', function(){ modelInfo.textContent=''; if (modelSel.value === '__custom__'){ vscode.postMessage({type:'customModel'}); } else { vscode.postMessage({type:'setModel', model:modelSel.value}); } });
+    input.addEventListener('input', autogrow);
+    providerSel.addEventListener('change', function(){ vscode.postMessage({type:'setProvider', provider:providerSel.value}); });
+    modelSel.addEventListener('change', function(){ if (modelSel.value === '__custom__'){ vscode.postMessage({type:'customModel'}); } else { showSelectedModel(modelSel.value); vscode.postMessage({type:'setModel', model:modelSel.value}); } });
     modeSel.addEventListener('change', function(){ vscode.postMessage({type:'setMode', mode:modeSel.value}); });
     effortSel.addEventListener('change', function(){ vscode.postMessage({type:'setEffort', effort:effortSel.value}); });
-    indexBtn.addEventListener('click', function(){ useIndex = !useIndex; applyIndexBtn(); vscode.postMessage({type:'setIndex', value:useIndex}); });
+    indexChk.addEventListener('change', function(){ useIndex = indexChk.checked; vscode.postMessage({type:'setIndex', value:useIndex}); });
     setkeyBtn.addEventListener('click', function(){ vscode.postMessage({type:'setKey'}); });
     loginBtn.addEventListener('click', function(){ vscode.postMessage({type: loggedInState ? 'logout' : 'login'}); });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
@@ -712,6 +863,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     window.addEventListener('message', function(ev){
       var m = ev.data;
       if (m.type === 'config'){
+        curProvider = m.provider; curDefaults = m.defaults || {};
         providerSel.innerHTML = '';
         m.providers.forEach(function(p){ var o = document.createElement('option'); o.value = p.id; o.textContent = p.label; if (p.id === m.provider) o.selected = true; providerSel.appendChild(o); });
         var cur = m.providers.filter(function(p){ return p.id === m.provider; })[0];
@@ -731,21 +883,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           setkeyBtn.style.display = 'none';
         }
         if (!m.canLogin){ loginBtn.style.display = 'none'; loggedInState = false; } else { loginBtn.style.display = ''; }
-      } else if (m.type === 'userMessage'){ addBubble('user').textContent = m.text; }
+        showSelectedModel(m.model);
+      } else if (m.type === 'userMessage'){ hideEmpty(); addBubble('user').textContent = m.text; }
       else if (m.type === 'status'){ statusEl.textContent = m.text; }
-      else if (m.type === 'assistantStart'){ if (revealTimer && answerEl && shownLen < answerRaw.length){ answerEl.innerHTML = render(answerRaw); } if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = addBubble('assistant'); curEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>'; answerEl=null; traceEl=null; answerRaw=''; thinkBody=null; started=false; shownLen=0; setStreaming(true); statusEl.textContent = ''; }
+      else if (m.type === 'context'){ hideEmpty(); var cdt=document.createElement('details'); cdt.className='ctx'; cdt.open=true; var csm=document.createElement('summary'); var cn=m.items.length; csm.textContent='🔎 sema context — '+cn+' result'+(cn===1?'':'s')+' (click to open)'; cdt.appendChild(csm); var cbd=document.createElement('div'); cbd.className='ctx-body'; m.items.forEach(function(it){ var row=document.createElement('div'); row.className='ctx-item'; row.textContent=it.file+':'+it.line+'  '+it.type+' '+it.name; row.title='Open '+it.file+':'+it.line; row.addEventListener('click', function(){ vscode.postMessage({type:'openFile', file:it.file, line:it.line}); }); cbd.appendChild(row); }); cdt.appendChild(cbd); messagesEl.appendChild(cdt); messagesEl.scrollTop=messagesEl.scrollHeight; }
+      else if (m.type === 'assistantStart'){ hideEmpty(); if (revealTimer && answerEl && shownLen < answerRaw.length){ answerEl.innerHTML = render(answerRaw); } if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = addBubble('assistant'); curEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>'; answerEl=null; traceEl=null; answerRaw=''; thinkBody=null; started=false; shownLen=0; setStreaming(true); statusEl.textContent = ''; }
       else if (m.type === 'thinking'){ ensureStructure(); if (!thinkBody){ var dt=document.createElement('details'); dt.className='think'; dt.open=true; var sm=document.createElement('summary'); sm.textContent='Thinking'; dt.appendChild(sm); thinkBody=document.createElement('div'); thinkBody.className='think-body'; dt.appendChild(thinkBody); traceEl.appendChild(dt); } thinkBody.textContent += m.text; messagesEl.scrollTop = messagesEl.scrollHeight; }
       else if (m.type === 'activity'){ ensureStructure(); var ac=document.createElement('div'); ac.className='act'; ac.textContent = '⚙ ' + m.tool + (m.detail ? '  ' + m.detail : ''); traceEl.appendChild(ac); messagesEl.scrollTop = messagesEl.scrollHeight; }
       else if (m.type === 'delta'){ ensureStructure(); answerRaw += m.text; startReveal(); }
       else if (m.type === 'assistantEnd'){ if (curEl && !started){ curEl.textContent = '(no output)'; } statusEl.textContent = ''; setStreaming(false); curEl = null; }
-      else if (m.type === 'error'){ addBubble('error').textContent = m.message; setStreaming(false); statusEl.textContent = ''; }
-      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; modelInfo.textContent = ''; }
+      else if (m.type === 'error'){ hideEmpty(); if (curEl && !started){ var ew = curEl.parentNode; if (ew && ew.parentNode){ ew.parentNode.removeChild(ew); } curEl = null; } addBubble('error').textContent = m.message; setStreaming(false); statusEl.textContent = ''; }
+      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; if (emptyEl){ emptyEl.style.display = ''; } showSelectedModel(modelSel.value); }
       else if (m.type === 'model'){ modelInfo.textContent = '→ ' + m.model; }
-      else if (m.type === 'notice'){ var nt=document.createElement('div'); nt.className='notice'; nt.textContent = m.text; messagesEl.appendChild(nt); messagesEl.scrollTop = messagesEl.scrollHeight; }
+      else if (m.type === 'notice'){ hideEmpty(); var nt=document.createElement('div'); nt.className='notice'; nt.textContent = m.text; messagesEl.appendChild(nt); messagesEl.scrollTop = messagesEl.scrollHeight; }
       else if (m.type === 'auth'){ if (!m.canLogin){ loginBtn.style.display='none'; loggedInState=false; } else { loginBtn.style.display=''; loggedInState=!!m.loggedIn; loginBtn.textContent = m.loggedIn ? '✓ Signed in' : 'Log in'; loginBtn.className = m.loggedIn ? 'ok' : 'warn'; loginBtn.title = m.loggedIn ? 'Signed in — click to sign out' : 'Sign in to the selected CLI (Claude Code / Codex)'; } }
     });
 
     setStreaming(false);
+    autogrow();
     vscode.postMessage({type:'ready'});
   })();
   </script>
