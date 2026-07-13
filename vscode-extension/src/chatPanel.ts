@@ -6,6 +6,7 @@ import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
 import { ChatProvider, TokenUsage } from './providers/types';
 import { redactPieces, redactionSummary } from './redact';
+import { SessionStore, StoredSession, createSession, freshUsage, titleFromMessages } from './sessionStore';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +18,8 @@ const REDACT_KEY = 'sema.chat.redact';
 const EFFORT_KEY = 'sema.chat.effort';
 const CUSTOM_MODELS_KEY = 'sema.chat.customModels';
 const RESOLVED_DEFAULT_KEY = 'sema.chat.resolvedDefault';
+// Per-workspace pointer to the session to reopen on the next launch (survives restart).
+const ACTIVE_SESSION_KEY = 'sema.chat.activeSessionId';
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '\n… (truncated)' : s;
@@ -105,12 +108,13 @@ function describeError(err: unknown): string {
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
-  private history: ChatMessage[] = [];
   private controller?: AbortController;
-  private sessionId?: string;
-  private sessionProvider?: string;
   private loginTerm?: vscode.Terminal;
   private redactHintShown = false;
+  /** Durable, per-workspace session storage (undefined only if storage is unavailable). */
+  private store?: SessionStore;
+  /** The conversation currently on screen — its `messages` array is the live transcript. */
+  private session: StoredSession;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -118,7 +122,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly repoRoot: string,
     private readonly sessionUsage: SessionUsage,
     private readonly refresh?: () => void,
-  ) {}
+  ) {
+    try {
+      this.store = new SessionStore(context.globalStorageUri.fsPath, repoRoot);
+    } catch {
+      this.store = undefined;
+    }
+    this.session = this.loadActiveOrNew();
+  }
+
+  /** The live transcript for the current session. */
+  private get history(): ChatMessage[] {
+    return this.session.messages;
+  }
+
+  /** Reopen the last-active session if it still exists, else start a fresh one. */
+  private loadActiveOrNew(): StoredSession {
+    const activeId = this.context.workspaceState.get<string>(ACTIVE_SESSION_KEY);
+    if (this.store && activeId) {
+      const loaded = this.store.load(activeId);
+      if (loaded) {
+        this.applyUsage(loaded.usage);
+        return loaded;
+      }
+    }
+    return createSession(this.providerId, this.modelId);
+  }
 
   private get providerId(): string {
     return this.context.globalState.get<string>(PROVIDER_KEY) ?? PROVIDERS[0].id;
@@ -185,18 +214,104 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** "New chat" — save the current session (if it has content), then start a fresh one. */
   clearConversation(): void {
-    this.history = [];
-    this.sessionId = undefined;
-    this.sessionProvider = undefined;
-    this.sessionUsage.input = 0;
-    this.sessionUsage.output = 0;
-    this.sessionUsage.cached = 0;
-    this.sessionUsage.cost = 0;
-    this.sessionUsage.costKnown = false;
-    this.sessionUsage.turns = 0;
+    this.persist();
+    this.controller?.abort();
+    this.session = createSession(this.providerId, this.modelId);
+    this.applyUsage(freshUsage());
+    void this.context.workspaceState.update(ACTIVE_SESSION_KEY, undefined);
     this.view?.webview.postMessage({ type: 'clear' });
+    this.sendSessions();
+  }
+
+  /** Overwrite the shared usage tally in place (the Manage view holds the same object). */
+  private applyUsage(u: SessionUsage): void {
+    this.sessionUsage.input = u.input;
+    this.sessionUsage.output = u.output;
+    this.sessionUsage.cached = u.cached;
+    this.sessionUsage.cost = u.cost;
+    this.sessionUsage.costKnown = u.costKnown;
+    this.sessionUsage.turns = u.turns;
     this.refresh?.();
+  }
+
+  /** Write the current session to disk (best-effort). No-op for an empty conversation. */
+  private persist(): void {
+    if (!this.store || this.session.messages.length === 0) {
+      return;
+    }
+    this.session.usage = { ...this.sessionUsage };
+    this.session.provider = this.providerId;
+    this.session.model = this.modelId;
+    this.session.updatedAt = Date.now();
+    if (!this.session.title || this.session.title === 'New chat') {
+      this.session.title = titleFromMessages(this.session.messages);
+    }
+    try {
+      this.store.save(this.session);
+      void this.context.workspaceState.update(ACTIVE_SESSION_KEY, this.session.id);
+    } catch {
+      // Persistence is best-effort — a failed write must never break the chat.
+    }
+    this.sendSessions();
+  }
+
+  /** Reopen a stored session by id, replacing what's on screen. */
+  private openSession(id: string): void {
+    if (id === this.session.id) {
+      this.view?.webview.postMessage({ type: 'historyClose' });
+      return;
+    }
+    this.persist();
+    const loaded = this.store?.load(id);
+    if (!loaded) {
+      this.view?.webview.postMessage({
+        type: 'error',
+        message: 'sema: could not open that chat — it may have been deleted.',
+      });
+      this.sendSessions();
+      return;
+    }
+    this.controller?.abort();
+    this.session = loaded;
+    this.applyUsage(loaded.usage);
+    void this.context.workspaceState.update(ACTIVE_SESSION_KEY, loaded.id);
+    this.restoreToWebview();
+    this.sendSessions();
+  }
+
+  /** Delete a stored session; if it's the open one, fall back to a fresh chat. */
+  private deleteSession(id: string): void {
+    this.store?.delete(id);
+    if (id === this.session.id) {
+      this.controller?.abort();
+      this.session = createSession(this.providerId, this.modelId);
+      this.applyUsage(freshUsage());
+      void this.context.workspaceState.update(ACTIVE_SESSION_KEY, undefined);
+      this.view?.webview.postMessage({ type: 'clear' });
+    }
+    this.sendSessions();
+  }
+
+  /** Push the session list (for the history browser) to the webview. */
+  private sendSessions(): void {
+    if (!this.view || !this.store) {
+      return;
+    }
+    this.view.webview.postMessage({
+      type: 'sessions',
+      sessions: this.store.list(),
+      activeId: this.session.id,
+    });
+  }
+
+  /** Re-render the current session's full transcript in the webview. */
+  private restoreToWebview(): void {
+    this.view?.webview.postMessage({
+      type: 'restore',
+      messages: this.session.messages.map((m) => ({ role: m.role, content: m.content })),
+    });
   }
 
   /** Fold one turn's usage into the running session totals and refresh the Manage view. */
@@ -382,6 +497,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case 'ready':
         await this.sendConfig();
+        this.restoreToWebview();
+        this.sendSessions();
         void this.refreshAuthState();
         break;
       case 'send':
@@ -389,6 +506,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'stop':
         this.controller?.abort();
+        break;
+      case 'newSession':
+        this.clearConversation();
+        break;
+      case 'listSessions':
+        this.sendSessions();
+        break;
+      case 'openSession':
+        this.openSession(String(msg.id ?? ''));
+        break;
+      case 'deleteSession':
+        this.deleteSession(String(msg.id ?? ''));
         break;
       case 'setProvider':
         await this.context.globalState.update(PROVIDER_KEY, String(msg.provider));
@@ -410,6 +539,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'setRedact':
         await this.context.globalState.update(REDACT_KEY, !!msg.value);
+        break;
+      case 'openLink':
+        if (msg.url) {
+          void vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
+        }
         break;
       case 'setEffort':
         await this.context.globalState.update(EFFORT_KEY, String(msg.effort));
@@ -590,8 +724,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       cliBin = cfg.get<string>('chat.opencodePath');
     }
 
-    // Resume the session only if it belongs to the current provider; otherwise start fresh.
-    const resumeId = this.sessionProvider === provider.id ? this.sessionId : undefined;
+    // Resume the CLI session only if it belongs to the current provider; otherwise start fresh.
+    const resumeId =
+      this.session.cliSessionProvider === provider.id ? this.session.cliSessionId : undefined;
     let assistant = '';
     try {
       await provider.stream({
@@ -609,8 +744,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         signal: this.controller.signal,
         sessionId: resumeId,
         onSession: (id) => {
-          this.sessionId = id;
-          this.sessionProvider = provider.id;
+          this.session.cliSessionId = id;
+          this.session.cliSessionProvider = provider.id;
         },
         onModel: (m) => {
           view.webview.postMessage({ type: 'model', model: m });
@@ -632,11 +767,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         // User stopped — keep the partial reply as a real turn.
         this.history.push({ role: 'assistant', content: assistant });
       } else {
-        // Hard failure — drop the user turn, and drop the session so the next turn
+        // Hard failure — drop the user turn, and drop the CLI session so the next turn
         // recovers with fresh, full history.
         this.history.pop();
-        this.sessionId = undefined;
-        this.sessionProvider = undefined;
+        this.session.cliSessionId = undefined;
+        this.session.cliSessionProvider = undefined;
         const raw = (err as Error).message;
         view.webview.postMessage({ type: 'error', message: describeError(err) });
         // Not signed in? Offer a one-click login for the CLI providers.
@@ -657,6 +792,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     } finally {
       view.webview.postMessage({ type: 'assistantEnd' });
       this.controller = undefined;
+      // Save the turn (transcript, usage, CLI-resume handle) so it survives a restart.
+      this.persist();
     }
   }
 
@@ -755,6 +892,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .msg.error .bubble { background: var(--vscode-inputValidation-errorBackground); border: 1px solid var(--vscode-inputValidation-errorBorder); }
   pre { background: var(--vscode-textCodeBlock-background); padding: 8px 10px; border-radius: 8px; overflow-x: auto; border: 1px solid var(--vscode-panel-border); }
   code { font-family: var(--vscode-editor-font-family); font-size: 12px; }
+  .tablewrap { overflow-x: auto; max-width: 100%; }
+  .bubble table { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+  .bubble th, .bubble td { border: 1px solid var(--vscode-panel-border); padding: 3px 7px; text-align: left; vertical-align: top; }
+  .bubble th { background: var(--vscode-editor-inactiveSelectionBackground); font-weight: 600; }
+  .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 8px 0 4px; font-size: 13px; }
+  .bubble ul, .bubble ol { margin: 4px 0; padding-left: 20px; }
+  .bubble li { margin: 1px 0; }
+  .bubble a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+  .bubble a:hover { text-decoration: underline; }
+  .bubble strong { font-weight: 600; }
   .typing span { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--vscode-descriptionForeground); animation: sema-blink 1.2s infinite both; }
   .typing span:nth-child(2) { animation-delay: .2s; }
   .typing span:nth-child(3) { animation-delay: .4s; }
@@ -792,15 +939,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .switch input:checked + .track { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
   .switch input:checked + .track::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
   .switch input:focus-visible + .track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+  /* ── History browser (session list overlay) ── */
+  #histpanel { display: none; position: absolute; inset: 0; z-index: 5; flex-direction: column; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+  #histpanel.open { display: flex; }
+  #histhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+  #histtitle { font-weight: 600; font-size: 13px; }
+  #histspacer { flex: 1; }
+  #histnew { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 6px; padding: 4px 10px; font-size: 11.5px; cursor: pointer; }
+  #histnew:hover { background: var(--vscode-button-hoverBackground); }
+  #histsearch { margin: 0 12px 8px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); background: var(--vscode-input-background); color: var(--vscode-input-foreground); outline: none; font-family: inherit; font-size: 12px; }
+  #histsearch:focus { border-color: var(--vscode-focusBorder); }
+  #histlist { flex: 1; overflow-y: auto; padding: 0 8px 10px; }
+  #histempty { display: none; padding: 24px 16px; text-align: center; font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; }
+  .hist-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .hist-item:hover { background: var(--vscode-list-hoverBackground); }
+  .hist-item.active { background: var(--vscode-list-inactiveSelectionBackground); }
+  .hist-main { flex: 1; min-width: 0; }
+  .hist-title { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-meta { font-size: 10.5px; color: var(--vscode-descriptionForeground); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-time { font-size: 10.5px; color: var(--vscode-descriptionForeground); flex: none; }
+  .hist-del { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 5px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; opacity: 0; }
+  .hist-item:hover .hist-del { opacity: .8; }
+  .hist-del:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-editorError-foreground, var(--vscode-foreground)); opacity: 1; }
 </style>
 </head>
 <body>
   <div id="header">
     <span id="brand"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg><span class="name">sema</span></span>
     <span id="modelinfo" title="Selected model id (→ marks the model a local CLI actually used)"></span>
-    <button id="clear" class="iconbtn" title="New chat (new session)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+    <button id="history" class="iconbtn" title="Chat history"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"></path><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path><path d="M12 7v5l4 2"></path></svg></button>
+    <button id="clear" class="iconbtn" title="New chat (current chat is saved to history)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
   </div>
   <div id="chatarea">
+    <div id="histpanel">
+      <div id="histhead">
+        <span id="histtitle">Chats</span>
+        <span id="histspacer"></span>
+        <button id="histnew" title="Start a new chat">+ New chat</button>
+        <button id="histclose" class="iconbtn" title="Close history"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+      </div>
+      <input id="histsearch" type="text" placeholder="Search chats…" />
+      <div id="histlist"></div>
+      <div id="histempty">No saved chats yet. Your conversations are saved here automatically.</div>
+    </div>
     <div id="messages"></div>
     <div id="empty">
       <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg></div>
@@ -870,6 +1052,54 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var FENCE = String.fromCharCode(96,96,96), BT = String.fromCharCode(96);
 
     function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function mdInline(s){
+      var parts = s.split(BT), out = '';
+      for (var i=0;i<parts.length;i++){
+        if (i % 2 === 1){ out += '<code>' + parts[i] + '</code>'; continue; }
+        var t = parts[i];
+        t = t.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+        t = t.replace(/(^|[^*])\\*([^*\\n]+)\\*/g, '$1<em>$2</em>');
+        t = t.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, '<a href="$2">$1</a>');
+        out += t;
+      }
+      return out;
+    }
+    function mdRow(line){
+      return line.trim().replace(/^\\|/, '').replace(/\\|$/, '').split('|').map(function(c){ return c.trim(); });
+    }
+    function mdTable(lines, start){
+      var head = mdRow(lines[start]), i = start + 2, rows = [];
+      while (i < lines.length && lines[i].indexOf('|') >= 0 && lines[i].trim() !== ''){ rows.push(mdRow(lines[i])); i++; }
+      var h = '<div class="tablewrap"><table><thead><tr>';
+      for (var a=0;a<head.length;a++){ h += '<th>' + mdInline(esc(head[a])) + '</th>'; }
+      h += '</tr></thead><tbody>';
+      for (var r=0;r<rows.length;r++){ h += '<tr>'; for (var c=0;c<rows[r].length;c++){ h += '<td>' + mdInline(esc(rows[r][c])) + '</td>'; } h += '</tr>'; }
+      return { html: h + '</tbody></table></div>', next: i };
+    }
+    function mdBlocks(md){
+      var lines = md.split('\\n'), out = '', i = 0;
+      while (i < lines.length){
+        var line = lines[i];
+        if (line.indexOf('|') >= 0 && i+1 < lines.length && lines[i+1].indexOf('|') >= 0 && lines[i+1].indexOf('-') >= 0 && /^[\\s|:\\-]+$/.test(lines[i+1])){
+          var tb = mdTable(lines, i); out += tb.html; i = tb.next; continue;
+        }
+        var hd = /^(#{1,6})\\s+(.*)$/.exec(line);
+        if (hd){ var lv = Math.min(6, hd[1].length + 2); out += '<h' + lv + '>' + mdInline(esc(hd[2])) + '</h' + lv + '>'; i++; continue; }
+        if (/^\\s*[-*+]\\s+/.test(line)){
+          var ul = '';
+          while (i < lines.length && /^\\s*[-*+]\\s+/.test(lines[i])){ ul += '<li>' + mdInline(esc(lines[i].replace(/^\\s*[-*+]\\s+/, ''))) + '</li>'; i++; }
+          out += '<ul>' + ul + '</ul>'; continue;
+        }
+        if (/^\\s*\\d+\\.\\s+/.test(line)){
+          var ol = '';
+          while (i < lines.length && /^\\s*\\d+\\.\\s+/.test(lines[i])){ ol += '<li>' + mdInline(esc(lines[i].replace(/^\\s*\\d+\\.\\s+/, ''))) + '</li>'; i++; }
+          out += '<ol>' + ol + '</ol>'; continue;
+        }
+        if (line.trim() === ''){ out += '<br>'; i++; continue; }
+        out += mdInline(esc(line)) + '<br>'; i++;
+      }
+      return out;
+    }
     function render(raw){
       var parts = raw.split(FENCE), html = '';
       for (var i=0;i<parts.length;i++){
@@ -877,9 +1107,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           var code = parts[i].replace(/^[a-zA-Z0-9_+.-]*\\n/, '');
           html += '<pre><code>' + esc(code) + '</code></pre>';
         } else {
-          var t = esc(parts[i]);
-          t = t.replace(new RegExp(BT + '([^' + BT + ']+)' + BT, 'g'), '<code>$1</code>');
-          html += t.replace(/\\n/g, '<br>');
+          html += mdBlocks(parts[i]);
         }
       }
       return html;
@@ -888,6 +1116,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       var wrap = document.createElement('div'); wrap.className = 'msg ' + role;
       var b = document.createElement('div'); b.className = 'bubble'; wrap.appendChild(b);
       messagesEl.appendChild(wrap); messagesEl.scrollTop = messagesEl.scrollHeight; return b;
+    }
+    // Re-render a stored message (assistant text goes through the markdown renderer).
+    function renderMessage(role, content){
+      if (role === 'assistant'){ addBubble('assistant').innerHTML = render(content); }
+      else { addBubble(role).textContent = content; }
     }
     var ICON_SEND = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V7"></path><path d="M6.5 12.5 L12 7 L17.5 12.5"></path></svg>';
     var ICON_STOP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"></rect></svg>';
@@ -899,6 +1132,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     sendBtn.addEventListener('click', doSend);
+    messagesEl.addEventListener('click', function(e){ var a = e.target && e.target.closest ? e.target.closest('a[href]') : null; if (a){ e.preventDefault(); vscode.postMessage({type:'openLink', url:a.getAttribute('href')}); } });
     input.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } });
     input.addEventListener('input', autogrow);
     providerSel.addEventListener('change', function(){ vscode.postMessage({type:'setProvider', provider:providerSel.value}); });
@@ -910,6 +1144,53 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     setkeyBtn.addEventListener('click', function(){ vscode.postMessage({type:'setKey'}); });
     loginBtn.addEventListener('click', function(){ vscode.postMessage({type: loggedInState ? 'logout' : 'login'}); });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
+
+    // ── history browser (session list overlay) ──
+    var histPanel = document.getElementById('histpanel');
+    var histList = document.getElementById('histlist');
+    var histSearch = document.getElementById('histsearch');
+    var histEmpty = document.getElementById('histempty');
+    var sessionsCache = [];
+    var activeSessionId = '';
+    function relTime(ms){
+      if (!ms) return '';
+      var s = Math.floor((Date.now() - ms) / 1000);
+      if (s < 45) return 'now';
+      if (s < 90) return '1m';
+      var mn = Math.floor(s/60); if (mn < 60) return mn + 'm';
+      var h = Math.floor(mn/60); if (h < 24) return h + 'h';
+      var d = Math.floor(h/24); if (d < 7) return d + 'd';
+      var wk = Math.floor(d/7); if (wk < 5) return wk + 'w';
+      var dt = new Date(ms); return (dt.getMonth()+1) + '/' + dt.getDate() + '/' + String(dt.getFullYear()).slice(2);
+    }
+    function openHistory(){ histPanel.classList.add('open'); histSearch.value=''; vscode.postMessage({type:'listSessions'}); histSearch.focus(); }
+    function closeHistory(){ histPanel.classList.remove('open'); }
+    var DEL_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6"></path></svg>';
+    function renderSessions(){
+      var q = (histSearch.value||'').toLowerCase().trim();
+      var list = sessionsCache.filter(function(s){ return !q || (s.title||'').toLowerCase().indexOf(q) >= 0; });
+      histList.innerHTML = '';
+      if (!sessionsCache.length){ histEmpty.style.display='block'; histEmpty.textContent='No saved chats yet. Your conversations are saved here automatically.'; return; }
+      if (!list.length){ histEmpty.style.display='block'; histEmpty.textContent='No chats match your search.'; return; }
+      histEmpty.style.display='none';
+      list.forEach(function(s){
+        var row = document.createElement('div'); row.className = 'hist-item' + (s.id === activeSessionId ? ' active' : '');
+        var main = document.createElement('div'); main.className='hist-main';
+        var t = document.createElement('div'); t.className='hist-title'; t.textContent = s.title || 'New chat'; main.appendChild(t);
+        var meta = document.createElement('div'); meta.className='hist-meta'; var bits=[]; if (s.provider) bits.push(s.provider); if (s.messageCount) bits.push(s.messageCount + ' msg' + (s.messageCount===1?'':'s')); meta.textContent = bits.join(' · '); main.appendChild(meta);
+        var time = document.createElement('span'); time.className='hist-time'; time.textContent = relTime(s.updatedAt);
+        var del = document.createElement('button'); del.className='hist-del'; del.title='Delete chat'; del.innerHTML=DEL_ICON;
+        row.appendChild(main); row.appendChild(time); row.appendChild(del);
+        del.addEventListener('click', function(e){ e.stopPropagation(); vscode.postMessage({type:'deleteSession', id:s.id}); });
+        row.addEventListener('click', function(){ vscode.postMessage({type:'openSession', id:s.id}); closeHistory(); });
+        histList.appendChild(row);
+      });
+    }
+    document.getElementById('history').addEventListener('click', openHistory);
+    document.getElementById('histclose').addEventListener('click', closeHistory);
+    document.getElementById('histnew').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); closeHistory(); });
+    histSearch.addEventListener('input', renderSessions);
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && histPanel.classList.contains('open')){ closeHistory(); } });
 
     window.addEventListener('message', function(ev){
       var m = ev.data;
@@ -945,7 +1226,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       else if (m.type === 'delta'){ ensureStructure(); answerRaw += m.text; startReveal(); }
       else if (m.type === 'assistantEnd'){ if (curEl && !started){ curEl.textContent = '(no output)'; } statusEl.textContent = ''; setStreaming(false); curEl = null; }
       else if (m.type === 'error'){ hideEmpty(); if (curEl && !started){ var ew = curEl.parentNode; if (ew && ew.parentNode){ ew.parentNode.removeChild(ew); } curEl = null; } addBubble('error').textContent = m.message; setStreaming(false); statusEl.textContent = ''; }
-      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; if (emptyEl){ emptyEl.style.display = ''; } showSelectedModel(modelSel.value); }
+      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = null; answerEl = null; setStreaming(false); statusEl.textContent = ''; if (emptyEl){ emptyEl.style.display = ''; } showSelectedModel(modelSel.value); }
+      else if (m.type === 'sessions'){ sessionsCache = m.sessions || []; activeSessionId = m.activeId || ''; renderSessions(); }
+      else if (m.type === 'restore'){
+        messagesEl.innerHTML = ''; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; }
+        curEl = null; answerEl = null; traceEl = null; answerRaw = ''; thinkBody = null; started = false; shownLen = 0; setStreaming(false); statusEl.textContent = '';
+        if (m.messages && m.messages.length){ hideEmpty(); m.messages.forEach(function(x){ renderMessage(x.role, x.content); }); }
+        else if (emptyEl){ emptyEl.style.display = ''; }
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+      else if (m.type === 'historyClose'){ closeHistory(); }
       else if (m.type === 'model'){ modelInfo.textContent = '→ ' + m.model; }
       else if (m.type === 'notice'){ hideEmpty(); var nt=document.createElement('div'); nt.className='notice'; nt.textContent = m.text; messagesEl.appendChild(nt); messagesEl.scrollTop = messagesEl.scrollHeight; }
       else if (m.type === 'auth'){ if (!m.canLogin){ loginBtn.style.display='none'; loggedInState=false; } else { loginBtn.style.display=''; loggedInState=!!m.loggedIn; loginBtn.textContent = m.loggedIn ? '✓ Signed in' : 'Log in'; loginBtn.className = m.loggedIn ? 'ok' : 'warn'; loginBtn.title = m.loggedIn ? 'Signed in — click to sign out' : 'Sign in to the selected CLI (Claude Code / Codex)'; } }

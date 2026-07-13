@@ -3,9 +3,32 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.4.0]
+
+### Added
+- **Persistent chat history & sessions (like Claude Code).** Conversations are now
+  saved automatically and survive VS Code restarts. A new **history** button (clock
+  icon) in the chat header opens a browser of your past chats — each showing its
+  title (taken from the first message), provider, message count, and when it was
+  last active — with search, click-to-open, hover-to-delete, and **+ New chat**.
+  The full transcript and running token/cost usage are restored when you reopen a
+  chat, and the extension reopens your last-active chat on launch.
+- **Model- and provider-agnostic transcripts.** History is stored independently of
+  the model, so you can switch provider or model mid-conversation and keep the same
+  thread; the CLI resume handle (Claude Code / Codex) is remembered per session and
+  reused only when the provider matches.
+- **Per-workspace storage.** Sessions are partitioned by repository (stored under
+  the extension's global storage), so each project keeps its own chat history.
+  "New chat" now saves the current conversation to history instead of discarding it.
+
 ## [0.3.0]
 
 ### Added
+- **Markdown rendering in chat replies.** Assistant messages now render Markdown —
+  tables (horizontally scrollable), **bold**/*italic*, headings, ordered/unordered
+  lists, links (open in the browser), and inline/fenced code — instead of showing
+  raw `**` and pipe tables. Streaming-tolerant: partial markdown renders as it
+  arrives and settles once complete.
 - **PII redaction mode (opt-in).** A new **redact** toggle scrubs sensitive data
   from everything sent to the model — a fast, offline regex layer for secrets and
   structured PII (emails, API keys/tokens, credit cards, SSNs, phone numbers), plus
