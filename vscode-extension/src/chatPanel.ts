@@ -870,7 +870,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   #header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-panel-border); }
   #brand { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-  #brand svg { width: 18px; height: 18px; color: var(--vscode-textLink-foreground); }
+  #brand svg { width: 18px; height: 18px; color: var(--vscode-foreground); }
   #brand .name { font-size: 13px; letter-spacing: .3px; }
   #modelinfo { flex: 1; text-align: right; font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--vscode-foreground); cursor: pointer; opacity: .75; flex: none; }
@@ -879,7 +879,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #chatarea { position: relative; flex: 1; overflow: hidden; }
   #messages { position: absolute; inset: 0; overflow-y: auto; padding: 12px; }
   #empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; pointer-events: none; }
-  #empty .logo { color: var(--vscode-textLink-foreground); opacity: .9; line-height: 0; }
+  #empty .logo { color: var(--vscode-foreground); opacity: .9; line-height: 0; }
   #empty .logo svg { width: 46px; height: 46px; }
   #empty .title { font-size: 18px; font-weight: 600; letter-spacing: .4px; }
   #empty .sub { font-size: 12px; color: var(--vscode-descriptionForeground); max-width: 280px; line-height: 1.55; }
@@ -930,14 +930,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #controls button:hover { border-color: var(--vscode-focusBorder); }
   #controls button.warn { color: var(--vscode-editorWarning-foreground); border-color: var(--vscode-editorWarning-foreground); }
   #controls button.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
-  #send { width: 30px; height: 30px; min-width: 30px; padding: 0; border: none; border-radius: 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
-  #send:hover { background: var(--vscode-button-hoverBackground); }
+  #send { width: 30px; height: 30px; min-width: 30px; padding: 0; border: none; border-radius: 8px; background: var(--vscode-foreground); color: var(--vscode-editor-background); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
+  #send:hover { opacity: .82; }
   .switch { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; font-size: 11.5px; color: var(--vscode-foreground); }
   .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .switch .track { position: relative; width: 26px; height: 15px; border-radius: 999px; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); transition: background .15s, border-color .15s; flex: none; }
   .switch .track::after { content: ''; position: absolute; top: 1px; left: 1px; width: 11px; height: 11px; border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform .15s, background .15s; }
-  .switch input:checked + .track { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
-  .switch input:checked + .track::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
+  .switch input:checked + .track { background: var(--vscode-foreground); border-color: var(--vscode-foreground); }
+  .switch input:checked + .track::after { transform: translateX(11px); background: var(--vscode-editor-background); }
   .switch input:focus-visible + .track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 
   /* ── History browser (session list overlay) ── */
@@ -946,8 +946,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #histhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
   #histtitle { font-weight: 600; font-size: 13px; }
   #histspacer { flex: 1; }
-  #histnew { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 6px; padding: 4px 10px; font-size: 11.5px; cursor: pointer; }
-  #histnew:hover { background: var(--vscode-button-hoverBackground); }
+  #histnew { background: var(--vscode-foreground); color: var(--vscode-editor-background); border: none; border-radius: 6px; padding: 4px 10px; font-size: 11.5px; cursor: pointer; }
+  #histnew:hover { opacity: .82; }
   #histsearch { margin: 0 12px 8px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); background: var(--vscode-input-background); color: var(--vscode-input-foreground); outline: none; font-family: inherit; font-size: 12px; }
   #histsearch:focus { border-color: var(--vscode-focusBorder); }
   #histlist { flex: 1; overflow-y: auto; padding: 0 8px 10px; }
