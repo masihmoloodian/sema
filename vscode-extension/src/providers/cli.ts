@@ -1,5 +1,8 @@
 import { spawn } from 'child_process';
-import { ChatMessage, ChatProvider, StreamOptions, TokenUsage } from './types';
+import { promises as fs, Dirent } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { ChatMessage, ChatProvider, ModelInfo, StreamOptions, TokenUsage } from './types';
 
 /** Flatten the system context + conversation into a single prompt string for a CLI. */
 function flattenPrompt(system: string, messages: ChatMessage[]): string {
@@ -56,11 +59,16 @@ interface Activity {
 abstract class CliProvider implements ChatProvider {
   abstract readonly id: string;
   abstract readonly label: string;
-  abstract readonly models: string[];
+  abstract readonly modelInfos: ModelInfo[];
   abstract readonly defaultModel: string;
   abstract readonly efforts: string[];
   readonly requiresKey = false;
   readonly readsWorkspace = true;
+
+  /** Flat model-id list, derived from the rich modelInfos. */
+  get models(): string[] {
+    return this.modelInfos.map((m) => m.id);
+  }
 
   protected abstract buildInvocation(opts: StreamOptions): {
     bin: string;
@@ -75,6 +83,19 @@ abstract class CliProvider implements ChatProvider {
   protected abstract extractUsage(event: unknown): TokenUsage | null;
   protected abstract checkError(event: unknown): string | null;
 
+  /**
+   * Some CLIs (Codex) never emit the model in their JSON stream, so
+   * {@link extractModel} can't see it. After a run finishes cleanly, a provider may
+   * override this to resolve the model another way (e.g. from a session log), keyed
+   * by the session id from {@link extractSession}. Returns null when unavailable.
+   */
+  protected async resolveModelAfterStream(
+    _session: string | null,
+    _opts: StreamOptions,
+  ): Promise<string | null> {
+    return null;
+  }
+
   async stream(opts: StreamOptions): Promise<void> {
     const { bin, args, prompt } = this.buildInvocation(opts);
     const exe = opts.cliBin && opts.cliBin.trim() ? opts.cliBin : bin;
@@ -88,7 +109,7 @@ abstract class CliProvider implements ChatProvider {
       let buf = '';
       let stderr = '';
       let errText = '';
-      let reportedSession = false;
+      let resolvedSession: string | null = null;
       let reportedModel = false;
       let reportedUsage = false;
       const seen = new Set<string>();
@@ -133,11 +154,13 @@ abstract class CliProvider implements ChatProvider {
               opts.onActivity(a.tool, a.detail);
             }
           }
-          if (!reportedSession && opts.onSession) {
+          if (!resolvedSession) {
             const sid = this.extractSession(event);
             if (sid) {
-              reportedSession = true;
-              opts.onSession(sid);
+              resolvedSession = sid;
+              if (opts.onSession) {
+                opts.onSession(sid);
+              }
             }
           }
           if (!reportedModel && opts.onModel) {
@@ -177,6 +200,16 @@ abstract class CliProvider implements ChatProvider {
           reject(new Error(errText));
         } else if (code !== 0) {
           reject(new Error(stderr.trim().split('\n').pop() || `${bin} exited with code ${code}`));
+        } else if (!reportedModel && opts.onModel) {
+          // The stream carried no model (Codex); resolve it out-of-band, then finish.
+          this.resolveModelAfterStream(resolvedSession, opts)
+            .then((m) => {
+              if (m && opts.onModel) {
+                opts.onModel(m);
+              }
+            })
+            .catch(() => {})
+            .finally(() => resolve());
         } else {
           resolve();
         }
@@ -189,8 +222,17 @@ abstract class CliProvider implements ChatProvider {
 export class ClaudeCodeProvider extends CliProvider {
   readonly id = 'claude-code';
   readonly label = 'Claude Code (local)';
-  readonly models = ['default', 'fable', 'opus', 'sonnet', 'haiku'];
+  // Invocation values are the CLI aliases (always resolve to the latest of each tier),
+  // with the current version shown as the display name. `claude --model` accepts these.
+  readonly modelInfos: ModelInfo[] = [
+    { id: 'default', name: 'Default', description: 'Recommended by Claude Code', recommended: true },
+    { id: 'opus', alias: 'opus', name: 'Opus 4.8' },
+    { id: 'fable', alias: 'fable', name: 'Fable 5' },
+    { id: 'sonnet', alias: 'sonnet', name: 'Sonnet 5' },
+    { id: 'haiku', alias: 'haiku', name: 'Haiku 4.5' },
+  ];
   readonly defaultModel = 'default';
+  // `claude --effort` accepts low/medium/high/xhigh/max ('default' = the CLI's own).
   readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
   readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'status'] };
 
@@ -313,9 +355,19 @@ export class ClaudeCodeProvider extends CliProvider {
 export class CodexProvider extends CliProvider {
   readonly id = 'codex';
   readonly label = 'Codex (local)';
-  readonly models = ['default', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
+  // Models per `codex debug models` (Codex CLI 0.133): gpt-5.5 / gpt-5.4 / gpt-5.4-mini.
+  // (gpt-5.6-sol/terra/luna are OpenAI API models — they belong to the `openai` provider,
+  // not the Codex CLI.) 'default' lets Codex pick its own configured model.
+  readonly modelInfos: ModelInfo[] = [
+    { id: 'default', name: 'Default', description: 'Recommended by Codex', recommended: true },
+    { id: 'gpt-5.5', name: 'GPT-5.5' },
+    { id: 'gpt-5.4', name: 'GPT-5.4' },
+    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+  ];
   readonly defaultModel = 'default';
-  readonly efforts = ['default', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  // codex reasoning efforts per `codex debug models` (low/medium/high/xhigh; default
+  // = medium). Current models expose no 'minimal', and there is no 'max' (Claude-only).
+  readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh'];
   readonly auth = { login: ['login'], logout: ['logout'], status: ['login', 'status'] };
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
@@ -381,8 +433,13 @@ export class CodexProvider extends CliProvider {
   }
 
   protected extractModel(): string | null {
-    // codex --json does not report the model; the picker shows the selection instead.
+    // codex --json never emits the model in its stream; resolveModelAfterStream reads
+    // it from the session rollout log once the run finishes.
     return null;
+  }
+
+  protected async resolveModelAfterStream(session: string | null): Promise<string | null> {
+    return session ? readCodexModelFromRollout(session) : null;
   }
 
   protected extractUsage(event: unknown): TokenUsage | null {
@@ -412,6 +469,74 @@ export class CodexProvider extends CliProvider {
 }
 
 /**
+ * Codex doesn't print its model in the `--json` stream, but it records the resolved
+ * model in the session rollout log it writes under `$CODEX_HOME/sessions` (a JSONL
+ * file whose name ends with the thread id). Given the thread id from `thread.started`,
+ * find that log and return the model from its last `turn_context` event — that reflects
+ * whatever `default` resolved to (config.toml, profile, or Codex's built-in default).
+ * Returns null if the log can't be found, read, or parsed.
+ */
+async function readCodexModelFromRollout(threadId: string): Promise<string | null> {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  const file = await findRolloutFile(path.join(home, 'sessions'), threadId);
+  if (!file) {
+    return null;
+  }
+  let text: string;
+  try {
+    text = await fs.readFile(file, 'utf8');
+  } catch {
+    return null;
+  }
+  let model: string | null = null;
+  for (const line of text.split('\n')) {
+    // `turn_context` is one line among many; skip the rest without parsing.
+    if (!line.includes('turn_context')) {
+      continue;
+    }
+    try {
+      const o = JSON.parse(line) as { type?: string; payload?: { model?: unknown } };
+      if (o.type === 'turn_context' && typeof o.payload?.model === 'string') {
+        model = o.payload.model; // keep the last — the most recent turn wins.
+      }
+    } catch {
+      // Ignore malformed lines.
+    }
+  }
+  return model;
+}
+
+/**
+ * Find `rollout-*-<threadId>.jsonl` under `dir`. Codex nests logs by date
+ * (`sessions/YYYY/MM/DD/`), so recurse newest-first (dir names sort chronologically)
+ * to find a just-written log quickly.
+ */
+async function findRolloutFile(dir: string, threadId: string): Promise<string | null> {
+  const suffix = `-${threadId}.jsonl`;
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const subdirs: string[] = [];
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      subdirs.push(path.join(dir, e.name));
+    } else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(suffix)) {
+      return path.join(dir, e.name);
+    }
+  }
+  for (const sub of subdirs.sort().reverse()) {
+    const found = await findRolloutFile(sub, threadId);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
  * opencode — `opencode run --format json`, a non-interactive agentic run that emits
  * JSONL events (one per line: text / reasoning / tool_use / error, each carrying
  * `sessionID`). `--auto` auto-approves permissions so a headless run never blocks;
@@ -423,8 +548,28 @@ export class CodexProvider extends CliProvider {
  */
 export class OpenCodeProvider extends CliProvider {
   readonly id = 'opencode';
-  readonly label = 'opencode (local)';
-  readonly models = ['default'];
+  readonly label = 'Open Code (local)';
+  // Curated subset of `opencode models` (the opencode/ catalog has ~55); "+ custom id…"
+  // reaches the rest. 'default' lets opencode use its own configured model.
+  readonly modelInfos: ModelInfo[] = [
+    { id: 'default', name: 'Default', recommended: true },
+    { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8' },
+    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
+    { id: 'opencode/claude-fable-5', name: 'Claude Fable 5' },
+    { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+    { id: 'opencode/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+    { id: 'opencode/gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+    { id: 'opencode/gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+    { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+    { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash' },
+    { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (free)' },
+    { id: 'opencode/glm-5.2', name: 'GLM 5.2' },
+    { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus' },
+    { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    { id: 'opencode/grok-4.5', name: 'Grok 4.5' },
+    { id: 'opencode/minimax-m3', name: 'MiniMax M3' },
+  ];
   readonly defaultModel = 'default';
   readonly efforts = ['default'];
   readonly modelHint =
@@ -435,6 +580,12 @@ export class OpenCodeProvider extends CliProvider {
     // --auto auto-approves permissions so a non-interactive run never hangs. Agent mode
     // uses the full-capability `build` agent; Ask/Plan use the read-only `plan` agent.
     const args = ['run', '--format', 'json', '--auto', '--agent', opts.agent ? 'build' : 'plan'];
+    if (opts.cwd) {
+      // opencode's server-based run does NOT adopt the spawn cwd as its project root —
+      // without this it works out of a temp dir. Point it at the workspace explicitly so
+      // its file/bash tools operate there, like Claude Code / Codex do via their cwd.
+      args.push('--dir', opts.cwd);
+    }
     if (opts.sessionId) {
       args.push('--session', opts.sessionId);
     }

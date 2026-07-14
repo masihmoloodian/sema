@@ -609,6 +609,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         id: p.id,
         label: p.label,
         models: [...p.models, ...this.customModels(p.id)],
+        modelInfos: [
+          ...p.modelInfos,
+          ...this.customModels(p.id).map((id) => ({ id, name: id, section: 'Custom' })),
+        ],
         efforts: p.efforts,
       })),
       provider: provider.id,
@@ -1200,11 +1204,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         m.providers.forEach(function(p){ var o = document.createElement('option'); o.value = p.id; o.textContent = p.label; if (p.id === m.provider) o.selected = true; providerSel.appendChild(o); });
         var cur = m.providers.filter(function(p){ return p.id === m.provider; })[0];
         modelSel.innerHTML = '';
-        if (cur){ cur.models.forEach(function(md){ var o = document.createElement('option'); o.value = md; var label = md; if (md === 'default' && m.defaults && m.defaults[m.provider]){ label = 'default (' + m.defaults[m.provider] + ')'; } o.textContent = label; if (md === m.model) o.selected = true; modelSel.appendChild(o); }); var co = document.createElement('option'); co.value = '__custom__'; co.textContent = '+ custom id…'; modelSel.appendChild(co); }
+        if (cur){
+          var infos = cur.modelInfos || (cur.models||[]).map(function(id){ return {id:id, name:id}; });
+          var order = [], bySection = {};
+          infos.forEach(function(mi){ var s = mi.section || ''; if (!(s in bySection)){ bySection[s] = []; order.push(s); } bySection[s].push(mi); });
+          function makeOption(mi){
+            var o = document.createElement('option'); o.value = mi.id;
+            var label = mi.name || mi.id;
+            if (mi.id === 'default' && m.defaults && m.defaults[m.provider]){ label = (mi.name || 'Default') + ' (' + m.defaults[m.provider] + ')'; }
+            o.textContent = label;
+            if (mi.description){ o.title = mi.description; }
+            if (mi.id === m.model){ o.selected = true; }
+            return o;
+          }
+          order.forEach(function(s){
+            if (s){ var og = document.createElement('optgroup'); og.label = s; bySection[s].forEach(function(mi){ og.appendChild(makeOption(mi)); }); modelSel.appendChild(og); }
+            else { bySection[s].forEach(function(mi){ modelSel.appendChild(makeOption(mi)); }); }
+          });
+          var co = document.createElement('option'); co.value = '__custom__'; co.textContent = '+ custom id…'; modelSel.appendChild(co);
+        }
         if (m.mode) { modeSel.value = m.mode; }
         effortSel.innerHTML = '';
         var efforts = (cur && cur.efforts) ? cur.efforts : ['default'];
-        efforts.forEach(function(ef){ var o = document.createElement('option'); o.value = ef; o.textContent = ef === 'default' ? 'effort: default' : ('effort: ' + ef); if (ef === m.effort) o.selected = true; effortSel.appendChild(o); });
+        efforts.forEach(function(ef){ var o = document.createElement('option'); o.value = ef; var lbl = ef === 'xhigh' ? 'extra high' : ef; o.textContent = 'effort: ' + lbl; if (ef === m.effort) o.selected = true; effortSel.appendChild(o); });
         effortSel.style.display = efforts.length > 1 ? '' : 'none';
         if (typeof m.useIndex === 'boolean'){ useIndex = m.useIndex; applyIndexBtn(); }
         if (typeof m.redact === 'boolean'){ redactChk.checked = m.redact; }

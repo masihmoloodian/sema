@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type OpenAI from 'openai';
+import type Anthropic from '@anthropic-ai/sdk';
 
 const execFileAsync = promisify(execFile);
 
@@ -139,6 +140,27 @@ export const READONLY_TOOLS: ToolDef[] = [
   'list_directory',
   'read_file',
 ].map((n) => DEFS[n]);
+
+/**
+ * The same toolset in Anthropic's Messages-API tool shape ({@link Anthropic.Tool}),
+ * derived from the OpenAI definitions above so both dialects stay in lockstep — one
+ * catalogue, one {@link executeTool} engine, two wire formats. The JSON Schema in
+ * `parameters` is exactly what Anthropic wants for `input_schema`.
+ */
+export function toAnthropicTools(defs: ToolDef[]): Anthropic.Tool[] {
+  const out: Anthropic.Tool[] = [];
+  for (const d of defs) {
+    if (d.type !== 'function') {
+      continue; // our catalogue is all function tools; ignore any other kind
+    }
+    out.push({
+      name: d.function.name,
+      description: d.function.description,
+      input_schema: (d.function.parameters ?? { type: 'object', properties: {} }) as Anthropic.Tool['input_schema'],
+    });
+  }
+  return out;
+}
 
 const MUTATING = new Set(['write_file', 'edit_file', 'delete_file', 'run_command']);
 

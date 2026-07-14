@@ -3,6 +3,41 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.5.0]
+
+### Added
+- **Refreshed models with friendly display names.** The picker now shows readable names
+  (e.g. "Opus 4.8") instead of raw ids, with optional `<optgroup>` sections supported in
+  the schema. Model lists were updated: Claude Code (Opus 4.8 / Fable 5 / Sonnet 5 /
+  Haiku 4.5 via CLI aliases), Codex (gpt-5.5 / gpt-5.4 / gpt-5.4-mini — verified against
+  `codex debug models`), OpenRouter, and Together AI. Custom ids still work via
+  "+ custom id…".
+- **Claude (Anthropic) now has a real Agent & Plan mode**, on par with the
+  OpenAI-compatible providers. The Anthropic provider used to be chat-only — in Agent
+  mode it could only *describe* changes. It now runs the same agentic tool loop over the
+  Messages API: it explores, edits, and runs commands directly in your workspace, feeding
+  each tool result back and iterating until done (Plan mode gets the read-only subset).
+  It drives the shared toolset — search_code, get_code, grep, glob, list_directory,
+  read_file, write_file, edit_file, delete_file, run_command — the same engine the
+  OpenAI/DeepSeek/OpenRouter/Together agents use, so behavior is consistent across every
+  API provider and inspired by the Claude Code / Codex / opencode CLIs.
+- **Codex (local) now shows its resolved default model.** Just like Claude Code, the
+  model picker displays `default (<model>)` for Codex once the first turn resolves it
+  (e.g. `default (gpt-5.5)`). Codex's `--json` stream doesn't report the model, so it's
+  read from the session rollout log Codex writes, then remembered per provider.
+
+### Fixed
+- **opencode (local) now runs in your workspace.** In Agent mode opencode was
+  operating from a temp directory — creating/editing files under `$TMPDIR/opencode`
+  instead of the open project — because its server-based `run` ignores the spawned
+  working directory. sema now passes `--dir <workspace>` so its file and bash tools
+  act on the current VS Code project, matching Claude Code and Codex.
+- **Reasoning-effort levels now match the CLIs.** Codex no longer offers `minimal`
+  (not supported by the current gpt-5.x models) — its levels are low / medium / high /
+  extra high. Claude Code remains low / medium / high / extra high / max. The `xhigh`
+  level now reads as **extra high** in the picker (the value sent to the CLI is
+  unchanged).
+
 ## [0.4.0]
 
 ### Added

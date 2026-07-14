@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { ChatProvider, StreamOptions } from './types';
+import { ChatProvider, ModelInfo, StreamOptions } from './types';
 import { AGENT_TOOLS, READONLY_TOOLS, executeTool, toolDetail, ToolContext } from './tools';
 
 /** Public list price (USD per 1M tokens) for a model, used to estimate cost. */
@@ -13,7 +13,10 @@ export interface ModelPrice {
 export interface OpenAICompatConfig {
   id: string;
   label: string;
-  models: string[];
+  /** Flat model-id list (openai, deepseek). Use modelInfos for a rich/sectioned list. */
+  models?: string[];
+  /** Rich model metadata (openrouter, together) — takes precedence over `models`. */
+  modelInfos?: ModelInfo[];
   defaultModel: string;
   secretKey: string;
   keyHint: string;
@@ -79,8 +82,11 @@ export class OpenAICompatibleProvider implements ChatProvider {
   get label(): string {
     return this.cfg.label;
   }
+  get modelInfos(): ModelInfo[] {
+    return this.cfg.modelInfos ?? (this.cfg.models ?? []).map((id) => ({ id }));
+  }
   get models(): string[] {
-    return this.cfg.models;
+    return this.modelInfos.map((m) => m.id);
   }
   get defaultModel(): string {
     return this.cfg.defaultModel;

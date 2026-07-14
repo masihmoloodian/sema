@@ -3,6 +3,22 @@ export interface ChatMessage {
   content: string;
 }
 
+/** Rich metadata for one selectable model, powering the grouped model picker. */
+export interface ModelInfo {
+  /** Value passed to the provider/CLI — a model id or a CLI alias (e.g. 'opus'). */
+  id: string;
+  /** Friendly display name shown in the picker; falls back to id. */
+  name?: string;
+  /** Optional CLI alias, for reference. */
+  alias?: string;
+  /** One-line description shown as the option's tooltip. */
+  description?: string;
+  /** Marks the recommended/default model (rendered with a ⭐). */
+  recommended?: boolean;
+  /** Optional group label; models sharing one render under an <optgroup>. */
+  section?: string;
+}
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -50,7 +66,10 @@ export interface StreamOptions {
 export interface ChatProvider {
   readonly id: string;
   readonly label: string;
+  /** Flat list of model ids (derived from modelInfos) — used for validation. */
   readonly models: string[];
+  /** Rich model metadata (names, sections, recommended) for the picker. */
+  readonly modelInfos: ModelInfo[];
   readonly defaultModel: string;
   /** Reasoning effort levels this provider supports; 'default' first. Single entry = no effort control. */
   readonly efforts: string[];
