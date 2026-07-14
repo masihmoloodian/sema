@@ -214,6 +214,55 @@ def _codex_config_remove(config_path: Path) -> bool:
     return True
 
 
+def _opencode_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
+    """Write mcp.sema into <project>/opencode.json. Returns (changed, config_path).
+
+    Uses project-level config so the hardcoded project path is correct — like Codex,
+    opencode has no {workspace_folder} substitution. In multi-project mode (roots given)
+    the block serves every project under the roots.
+    """
+    import sys
+    sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
+    config_path = project_root / "opencode.json"
+
+    data: dict = {}
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return False, config_path  # don't clobber malformed user config
+
+    mcp = data.setdefault("mcp", {})
+    if "sema" in mcp:
+        return False, config_path  # already present
+
+    data.setdefault("$schema", "https://opencode.ai/config.json")
+    mcp["sema"] = {
+        "type": "local",
+        "command": [sema_bin, *_serve_args(project_root, roots)],
+        "enabled": True,
+    }
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+    return True, config_path
+
+
+def _opencode_config_remove(config_path: Path) -> bool:
+    """Remove mcp.sema from opencode.json. Returns True if removed."""
+    if not config_path.exists():
+        return False
+    try:
+        data = json.loads(config_path.read_text())
+    except json.JSONDecodeError:
+        return False
+    if "sema" not in data.get("mcp", {}):
+        return False
+    del data["mcp"]["sema"]
+    if not data["mcp"]:
+        del data["mcp"]
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+    return True
+
+
 @main.command()
 @click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code / Codex")
 @click.option("--codex", "target", flag_value="codex", help="Register with OpenAI Codex")
@@ -314,6 +363,102 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: li
     else:
         console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
     console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Codex to confirm.")
+
+
+@main.command()
+@click.option("--uninstall", is_flag=True, help="Remove sema from every detected AI CLI")
+@click.option("--skip-claude", is_flag=True, help="Do not touch Claude Code")
+@click.option("--skip-codex", is_flag=True, help="Do not touch OpenAI Codex")
+@click.option("--skip-opencode", is_flag=True, help="Do not touch opencode")
+@click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
+              help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
+def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: bool, roots: tuple[str, ...]):
+    """Detect installed AI CLIs and register sema with each in one shot.
+
+    The one-command counterpart to `sema init`: instead of registering with a
+    single client, it discovers which of Claude Code, Codex, and opencode are
+    installed and wires sema into each. Idempotent and safe to re-run. Skip any
+    client with --skip-<name>; env vars SEMA_SKIP_CLAUDE / SEMA_SKIP_CODEX /
+    SEMA_SKIP_OPENCODE (set by the installer) are honoured too.
+    """
+    import os
+
+    project_root = Path(".").resolve()
+    index_path = project_root / DEFAULT_INDEX_DIR
+    root_paths = [Path(r).resolve() for r in roots]
+
+    skip_claude = skip_claude or os.environ.get("SEMA_SKIP_CLAUDE") == "1"
+    skip_codex = skip_codex or os.environ.get("SEMA_SKIP_CODEX") == "1"
+    skip_opencode = skip_opencode or os.environ.get("SEMA_SKIP_OPENCODE") == "1"
+
+    # Both project-scoped clients (codex, opencode) need an index present unless
+    # we're serving whole roots. Claude is user-scoped and checked the same way.
+    if not uninstall and not root_paths and not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    if not uninstall and root_paths:
+        _report_discovered(root_paths)
+
+    claude_bin = _find_claude_bin()
+    codex_bin = shutil.which("codex")
+    opencode_bin = shutil.which("opencode")
+
+    console.print()
+    verb = "Removing" if uninstall else "Registering"
+    console.print(f"[bold]{verb} sema[/bold]")
+
+    any_client = False
+
+    # ── Claude Code (user scope) ──────────────────────────────────────────────
+    if skip_claude:
+        console.print("  Claude Code  [dim]– skipped[/dim]")
+    elif not claude_bin:
+        console.print("  Claude Code  [dim]– CLI not found[/dim]")
+    else:
+        any_client = True
+        if uninstall:
+            ok = _claude_mcp_remove(scope="user")
+            console.print(f"  Claude Code  {'[yellow]✔ removed[/yellow]' if ok else '[red]✗ failed[/red]'}")
+        else:
+            ok = _claude_mcp_add(project_root=project_root, roots=root_paths or None, scope="user")
+            console.print(f"  Claude Code  {'[green]✔ registered[/green]' if ok else '[red]✗ failed[/red]'}")
+
+    # ── Codex (project scope) ─────────────────────────────────────────────────
+    if skip_codex:
+        console.print("  Codex        [dim]– skipped[/dim]")
+    elif not codex_bin:
+        console.print("  Codex        [dim]– CLI not found[/dim]")
+    else:
+        any_client = True
+        codex_cfg = project_root / ".codex" / "config.toml"
+        if uninstall:
+            removed = _codex_config_remove(codex_cfg)
+            console.print(f"  Codex        {'[yellow]✔ removed[/yellow]' if removed else '[dim]– nothing to remove[/dim]'}")
+        else:
+            changed, _cfg = _codex_config_add(project_root, roots=root_paths or None)
+            console.print(f"  Codex        {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+
+    # ── opencode (project scope) ──────────────────────────────────────────────
+    if skip_opencode:
+        console.print("  opencode     [dim]– skipped[/dim]")
+    elif not opencode_bin:
+        console.print("  opencode     [dim]– CLI not found[/dim]")
+    else:
+        any_client = True
+        opencode_cfg = project_root / "opencode.json"
+        if uninstall:
+            removed = _opencode_config_remove(opencode_cfg)
+            console.print(f"  opencode     {'[yellow]✔ removed[/yellow]' if removed else '[dim]– nothing to remove[/dim]'}")
+        else:
+            changed, _cfg = _opencode_config_add(project_root, roots=root_paths or None)
+            console.print(f"  opencode     {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+
+    console.print()
+    if not any_client and not uninstall:
+        console.print("[yellow]No supported AI CLIs detected.[/yellow] Install Claude Code, Codex, or opencode, then re-run [bold]sema setup[/bold].")
+    elif not uninstall:
+        console.print("[bold]Done.[/bold] Run [bold]/mcp[/bold] in your AI CLI to confirm, or [bold]sema doctor[/bold] to diagnose.")
 
 
 @main.command()

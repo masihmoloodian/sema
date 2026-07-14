@@ -77,22 +77,46 @@ See the [benchmarks](https://github.com/masihmoloodian/sema/blob/main/docs/bench
 
 ## Quick start
 
-Up and running in a few minutes.
+**One line** — installs the `sema` command (bootstrapping [uv](https://docs.astral.sh/uv/) and a Python for it if needed), then offers to register with whichever AI CLIs you have:
 
 ```bash
-# 1 · INSTALL — provides the `sema` command
-pip install sema-mcp        # or: uv tool install sema-mcp
-
-# 2 · INDEX & REGISTER
-cd your-project
-sema index .
-sema init --claude     # or: sema init --codex
-
-# 3 · CONFIRM — reload VS Code, then type /mcp
-#     ✓ sema connected
+curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
 ```
 
-Requires **Python 3.11+**. No Docker, no external APIs, no GPU — everything runs on your machine. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md#install-from-source-for-development).
+Then, inside each project:
+
+```bash
+cd your-project
+sema index .     # build the local semantic index
+sema setup       # register with every detected CLI: Claude Code, Codex, opencode
+```
+
+Skip any client with an env var — e.g. install everything but leave Codex alone:
+
+```bash
+SEMA_SKIP_CODEX=1 curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
+```
+
+`SEMA_SKIP_CLAUDE`, `SEMA_SKIP_CODEX`, `SEMA_SKIP_OPENCODE`, and `SEMA_NO_SETUP=1` (binary only) are all honoured, and `sema setup` takes the matching `--skip-*` flags.
+
+<details>
+<summary><strong>Prefer to install it yourself?</strong> (no <code>curl | sh</code>)</summary>
+
+```bash
+uv tool install sema-mcp     # or: pipx install sema-mcp / pip install sema-mcp
+cd your-project
+sema index .
+sema setup                   # all detected CLIs at once
+#   ...or one at a time:
+sema init --claude           # or --codex
+```
+
+The installer script is [install.sh](https://github.com/masihmoloodian/sema/blob/main/install.sh) — read it before running if you like.
+</details>
+
+**Confirm:** reload your editor, type `/mcp`, and look for `✓ sema connected`. Stuck? Run `sema doctor`.
+
+Requires **Python 3.11+** (uv installs one for you if you don't have it). No Docker, no external APIs, no GPU — everything runs on your machine. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md#install-from-source-for-development).
 
 Then add a `CLAUDE.md` (or `AGENTS.md` for Codex) so your assistant calls sema before reading files — see [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) or [OpenAI Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md).
 
