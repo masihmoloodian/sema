@@ -11,16 +11,16 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" />
 </p>
 
+<p align="center"><strong>One local index. Every AI, code-aware.</strong></p>
+
 > **Experimental** — sema is under active development. APIs and index formats may change between versions. See the [disclaimer](https://github.com/masihmoloodian/sema/blob/main/docs/faq.md#disclaimer).
 
-**Semantic search over your codebase, a reuse guard that stops your AI reinventing code you already have — and a Cursor-style chat + agent that can actually change it. All local.**
+Sema builds a **single semantic index** of your codebase — every function, class, and method — and puts it to work two ways:
 
-Sema builds one local semantic index of your codebase — every function, class, and method — and puts it to work two ways:
+- **🧠 Code intelligence for Claude Code & Codex.** An MCP server hands your CLI assistant semantic search (`search_code`), a reuse guard (`check_reuse`), and impact analysis over stdio — so it stops reading files blindly and stops rewriting helpers you already have.
+- **🖥️ A Cursor-style chat & agent in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs your repo. Use the **Claude Code**, **Codex**, and **opencode** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI** keys — switching **provider and model mid-conversation**, all backed by the same local index. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
-- **🧠 Code intelligence for Claude Code & Codex.** An MCP server hands your CLI assistant semantic search (`search_code`), a reuse guard (`check_reuse`), and impact analysis, so it stops reading files blindly and stops rewriting helpers that already exist.
-- **🖥️ A Cursor-style AI panel in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs commands in your repo. Use the **Claude Code**, **Codex**, and **opencode** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI** keys — switching **provider and model mid-conversation**, with the same index as context. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
-
-The index runs fully offline — local SBERT embeddings, no API keys, no code leaves your machine. The chat/agent talks to whichever model you point it at.
+**No keys, no cloud, nothing leaves your machine.** The index runs fully offline — local SBERT embeddings, no API keys. The chat/agent talks to whichever model you point it at, with opt-in PII redaction before anything is sent.
 
 Works with
 <a href="https://github.com/anthropics/claude-code"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg" alt="Claude" height="16" style="vertical-align:middle;" /> **Claude Code CLI**</a>,
@@ -28,23 +28,39 @@ Works with
 <a href="https://github.com/openai/codex"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/codex-color.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **OpenAI Codex CLI**</a>,
 and
 <a href="https://marketplace.visualstudio.com/items?itemName=openai.chatgpt"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="Codex" height="16" style="vertical-align:middle;" /> **Codex VS Code**</a>.
-Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a> — a Cursor-style **chat + agent** panel that reads, edits, and runs your codebase through the Claude Code and Codex you already run locally, or your own API keys.
+Plus sema's own <a href="https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/vscode.svg" alt="VS Code" height="16" style="vertical-align:middle;" /> **VS Code extension**</a>.
 
-## Features
+## By the numbers
 
-### The index — code intelligence for Claude Code & Codex (MCP)
+| | |
+|---|---|
+| **4–11×** | fewer tokens per question |
+| **98%** | reuse-vs-build accuracy ([50-example eval](https://github.com/masihmoloodian/sema/blob/main/docs/benchmarks.md)) |
+| **~150** | tokens per search — signatures, not whole files |
+| **0** | code that leaves your machine |
 
-- **🔍 Semantic search** — `search_code()` finds code by meaning and returns signatures only (~150 tokens), never whole files.
-- **♻️ Reuse guard** — `check_reuse()` tells your assistant whether a function already exists *before* it writes a new one. **98% reuse-vs-build accuracy** in a 50-example eval on real code.
-- **🕸️ Impact analysis** — `impact_analysis()` maps the call graph in both directions, so the AI sees the blast radius before a refactor.
+## Two ways to use it
+
+One index. A CLI brain and a VS Code panel.
+
+### 🧠 The index — for Claude Code & Codex (MCP)
+
+Hands your CLI assistant semantic search, a reuse guard, and impact analysis over stdio — so it stops reading files blindly and stops rewriting helpers you already have.
+
+- **🔍 `search_code()`** — finds code by meaning and returns signatures only (~150 tokens), never whole files.
+- **♻️ `check_reuse()`** — tells your assistant whether a function already exists *before* it writes a new one. **98% reuse-vs-build accuracy** on real code.
+- **🕸️ `impact_analysis()`** — maps the call graph in both directions, so the AI sees the blast radius before a refactor.
 - **📁 Multi-project** — one `sema init --root <dir>` serves every indexed repo under a directory; no re-registration when you switch projects.
 - **🔒 Local & offline** — embeddings run on your machine (SBERT, ~80MB). No API keys, no internet, no code leaves your laptop.
 
-### The VS Code panel — a Cursor-style chat & agent
+### 🖥️ The panel — a Cursor-style chat & agent
 
-- **💬 Eight providers, one conversation** — chat through **Claude Code**, **Codex**, **opencode**, **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI**, switching **provider and model between turns**.
-- **🤖 Ask · Plan · Agent** — **Ask** answers read-only, **Plan** investigates with read-only tools and proposes a step-by-step plan, **Agent** does the work: a real tool loop — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so it reads, edits files, and runs commands. **Even API models (OpenRouter, OpenAI, DeepSeek, Together AI) act — not just the local CLIs.**
-- **🔎 Powered by your index** — the agent searches your sema index directly (`search_code` / `get_code`); an index toggle can also inject retrieved code as RAG context.
+Not just an index — a full chat and agent that reads, edits, and runs your repo. Eight providers, one conversation, backed by the same local index.
+
+- **💬 Eight engines, one conversation** — chat through **Claude Code**, **Codex**, and **opencode** running locally (reuse your login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key — switching **provider and model between turns**.
+- **🤖 Ask · Plan · Agent** — **Ask** answers read-only, **Plan** investigates with read-only tools and proposes a step-by-step plan, **Agent** does the work: a real tool loop (`search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command`). **Even API models act — not just the local CLIs.**
+- **🔎 Powered by your index** — the agent searches your sema index directly; an index toggle can also inject retrieved code as RAG context.
+- **🛡️ Opt-in PII redaction** — redact secrets and personal data before anything is sent to a remote model.
 - **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, live **token usage + estimated cost**, plus **Search** and **Reuse** from the command palette.
 
 [Get the extension on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
@@ -61,25 +77,28 @@ See the [benchmarks](https://github.com/masihmoloodian/sema/blob/main/docs/bench
 
 ## Quick start
 
+Up and running in a few minutes.
+
 ```bash
-# 1. Install — provides the `sema` command
+# 1 · INSTALL — provides the `sema` command
 pip install sema-mcp        # or: uv tool install sema-mcp
 
-# 2. Index your project and register with your AI assistant
+# 2 · INDEX & REGISTER
 cd your-project
 sema index .
 sema init --claude     # or: sema init --codex
 
-# 3. Reload VS Code, then type /mcp to confirm sema is connected
+# 3 · CONFIRM — reload VS Code, then type /mcp
+#     ✓ sema connected
 ```
 
-Requires **Python 3.11+**. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md#install-from-source-for-development).
+Requires **Python 3.11+**. No Docker, no external APIs, no GPU — everything runs on your machine. On PyPI the package is **`sema-mcp`** (the name `sema` was taken), but the command and import stay `sema`. Working on sema itself? [Install from source](https://github.com/masihmoloodian/sema/blob/main/docs/installation.md#install-from-source-for-development).
 
 Then add a `CLAUDE.md` (or `AGENTS.md` for Codex) so your assistant calls sema before reading files — see [Claude Code setup](https://github.com/masihmoloodian/sema/blob/main/docs/claude-code.md) or [OpenAI Codex setup](https://github.com/masihmoloodian/sema/blob/main/docs/codex.md).
 
-Requires Python 3.11+. No Docker, no external APIs, no GPU — everything runs on your machine.
-
 ## How it works
+
+Every message routes through the same local pipeline — retrieve context from the index, then dispatch to whichever engine you pick.
 
 `sema index .` uses tree-sitter to parse every function, class, and method, embeds each one locally with SBERT (`all-MiniLM-L6-v2`), and stores the vectors plus full source in an embedded ChromaDB. A local MCP server then exposes search tools to Claude/Codex over stdio. `search_code()` returns signatures only; `get_code()` returns full bodies on demand.
 
@@ -92,11 +111,12 @@ See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/archite
 [![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?label=VS%20Code%20Marketplace&color=1e88e5&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/MasihMoloodian.sema-codebase-chat?color=1e88e5)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
-Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. Chat through the **Claude Code** and **Codex** you already have installed (or your own API keys), switch **provider and model mid-session**, and let it act:
+Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. One conversation, eight engines, one index — switch provider mid-conversation.
 
 - **💬 Eight providers, one conversation** — **Claude Code**, **Codex**, and **opencode** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key; switch provider and model between turns.
 - **🤖 Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with read-only tools and propose a step-by-step plan, **Agent** to carry it out. In Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so **even API models (OpenRouter, OpenAI, DeepSeek, Together AI) read, edit files, and run commands**, not just the local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
 - **🔎 Index-aware** — the agent searches your sema index directly; an index toggle also injects retrieved code as RAG on demand.
+- **🛡️ Opt-in PII redaction** — strip secrets and personal data before anything is sent to a remote model.
 - **🧠 Reasoning-effort selector, streamed thinking + tool activity, per-session memory**, and the live **selected model id** — the model the API actually served, not what it claims to be.
 - **🛠️ Manage panel** — index status, one-click re-index / register / watch / doctor, and live **token usage + estimated cost**. **⚡ Search** and **Reuse** from the command palette, with index freshness in the status bar.
 
