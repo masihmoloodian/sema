@@ -1,7 +1,7 @@
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <rect width="128" height="128" rx="26" fill="#0A0A0A"/>
-  <g transform="translate(-3.2,-3.2) scale(5.6)" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="0.8" stroke-linejoin="round">
-    <path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"/>
-    <path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"/>
+  <g transform="translate(12,12) scale(4.333)" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="0.2" stroke-linejoin="round">
+    <path d="M8.06 3.83 L22.00 3.83 L17.55 8.38 L16.37 9.46 L14.92 9.92 L2.40 9.92 L2.23 9.63 L2.79 7.95 L4.01 6.00 L5.82 4.52 L8.03 3.86 Z"/>
+    <path d="M10.60 12.43 L21.01 12.43 L21.14 13.25 L20.65 15.23 L19.00 17.93 L17.26 19.31 L14.82 20.14 L2.00 20.17 L8.92 13.15 L10.57 12.46 Z"/>
   </g>
 </svg>

@@ -970,7 +970,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div id="header">
-    <span id="brand"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg><span class="name">sema</span></span>
+    <span id="brand"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0.4" stroke-linejoin="round"><path d="M8.06 3.83 L22.00 3.83 L17.55 8.38 L16.37 9.46 L14.92 9.92 L2.40 9.92 L2.23 9.63 L2.79 7.95 L4.01 6.00 L5.82 4.52 L8.03 3.86 Z"></path><path d="M10.60 12.43 L21.01 12.43 L21.14 13.25 L20.65 15.23 L19.00 17.93 L17.26 19.31 L14.82 20.14 L2.00 20.17 L8.92 13.15 L10.57 12.46 Z"></path></svg><span class="name">sema</span></span>
     <span id="modelinfo" title="Selected model id (→ marks the model a local CLI actually used)"></span>
     <button id="history" class="iconbtn" title="Chat history"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"></path><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path><path d="M12 7v5l4 2"></path></svg></button>
     <button id="clear" class="iconbtn" title="New chat (current chat is saved to history)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
@@ -989,7 +989,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     </div>
     <div id="messages"></div>
     <div id="empty">
-      <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 5.2 H18.2 L15 9.4 H5.8 Z"></path><path d="M9 14.6 H18.2 L15 18.8 H5.8 Z"></path></svg></div>
+      <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0.4" stroke-linejoin="round"><path d="M8.06 3.83 L22.00 3.83 L17.55 8.38 L16.37 9.46 L14.92 9.92 L2.40 9.92 L2.23 9.63 L2.79 7.95 L4.01 6.00 L5.82 4.52 L8.03 3.86 Z"></path><path d="M10.60 12.43 L21.01 12.43 L21.14 13.25 L20.65 15.23 L19.00 17.93 L17.26 19.31 L14.82 20.14 L2.00 20.17 L8.92 13.15 L10.57 12.46 Z"></path></svg></div>
       <div class="title">sema</div>
       <div class="sub">Chat with your codebase. Pick a provider below, then <b>Ask</b> a question, let it <b>Plan</b>, or switch to <b>Agent</b> to make changes.</div>
     </div>
