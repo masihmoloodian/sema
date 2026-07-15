@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
-import { ChatProvider, ModelInfo, StreamOptions } from './types';
+import { AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions } from './types';
 import { AGENT_TOOLS, READONLY_TOOLS, executeTool, toolDetail, ToolContext } from './tools';
+import { readBase64, toDataUri } from '../attachments';
 
 /** Public list price (USD per 1M tokens) for a model, used to estimate cost. */
 export interface ModelPrice {
@@ -30,6 +31,12 @@ export interface OpenAICompatConfig {
   prices?: Record<string, ModelPrice>;
   /** True when the API returns a real `usage.cost` (OpenRouter) — use it instead of estimating. */
   costFromResponse?: boolean;
+  /**
+   * Attachment kinds this provider's models read by default; 'text' is implicit. A
+   * `ModelInfo.accepts` entry overrides this for one model. Omit for text-only
+   * providers (DeepSeek).
+   */
+  accepts?: readonly AttachmentKind[];
 }
 
 /** Superset of the OpenAI usage shape, covering DeepSeek's cache fields and OpenRouter's cost. */
@@ -55,6 +62,34 @@ interface UsageTotals {
 
 type Messages = OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 
+/**
+ * Render a turn as content parts. Both `image_url.url` and `file.file_data` must be
+ * data URIs here (unlike Anthropic, which wants bare base64), and `filename` is
+ * required alongside `file_data`. Plain string content when nothing is attached.
+ */
+async function toContent(
+  m: ChatMessage,
+  dir: string | undefined,
+): Promise<string | OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
+  const atts = m.attachments ?? [];
+  if (!atts.length || !dir) {
+    return m.content;
+  }
+  const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
+  if (m.content.trim()) {
+    parts.push({ type: 'text', text: m.content });
+  }
+  for (const a of atts) {
+    const uri = toDataUri(a.mime, await readBase64(dir, a));
+    if (a.kind === 'image') {
+      parts.push({ type: 'image_url', image_url: { url: uri } });
+    } else if (a.kind === 'pdf') {
+      parts.push({ type: 'file', file: { filename: a.name, file_data: uri } });
+    }
+  }
+  return parts.length ? parts : m.content;
+}
+
 /** Cap on agent tool-call rounds per turn — a backstop against a looping model. */
 const MAX_AGENT_STEPS = 50;
 
@@ -70,7 +105,8 @@ const MAX_AGENT_STEPS = 50;
  * bare chat model can actually create/edit files, not just describe how.
  */
 export class OpenAICompatibleProvider implements ChatProvider {
-  readonly efforts = ['default'];
+  // No `efforts`: these providers take a plain chat-completions request with no
+  // reasoning-effort argument to pass through.
   readonly requiresKey = true;
   readonly readsWorkspace = false;
 
@@ -101,6 +137,11 @@ export class OpenAICompatibleProvider implements ChatProvider {
     return this.cfg.modelHint;
   }
 
+  accepts(model: string): readonly AttachmentKind[] {
+    const info = this.modelInfos.find((m) => m.id === model);
+    return info?.accepts ?? this.cfg.accepts ?? ['text'];
+  }
+
   async stream(opts: StreamOptions): Promise<void> {
     const client = new OpenAI({
       apiKey: opts.apiKey,
@@ -109,7 +150,13 @@ export class OpenAICompatibleProvider implements ChatProvider {
     });
     const messages: Messages = [
       { role: 'system', content: opts.system },
-      ...opts.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(await Promise.all(
+        opts.messages.map(async (m) =>
+          m.role === 'user'
+            ? { role: 'user' as const, content: await toContent(m, opts.attachmentsDir) }
+            : { role: 'assistant' as const, content: m.content },
+        ),
+      )),
     ];
     if (opts.agent || opts.plan) {
       // Agent = full read/write/run toolset; Plan = read-only investigation tools.

@@ -4,9 +4,10 @@ import { promisify } from 'util';
 import * as path from 'path';
 import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
-import { ChatProvider, TokenUsage } from './providers/types';
+import { Attachment, ChatProvider, TokenUsage } from './providers/types';
 import { redactPieces, redactionSummary } from './redact';
 import { SessionStore, StoredSession, createSession, freshUsage, titleFromMessages } from './sessionStore';
+import { formatSize, materialize, stage, totalBytes, unstage, LIMITS } from './attachments';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,6 +116,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private store?: SessionStore;
   /** The conversation currently on screen — its `messages` array is the live transcript. */
   private session: StoredSession;
+  /** Files staged for the next turn — the composer's chips, not yet part of a message. */
+  private pending: Attachment[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -125,10 +128,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ) {
     try {
       this.store = new SessionStore(context.globalStorageUri.fsPath, repoRoot);
+      // Sweep attachment dirs whose session is gone — an abandoned "New chat", or a
+      // turn that errored out and was popped.
+      this.store.gcOrphans();
     } catch {
       this.store = undefined;
     }
     this.session = this.loadActiveOrNew();
+  }
+
+  /** Where this session's attached files are staged; undefined if storage is unavailable. */
+  private get attachmentsDir(): string | undefined {
+    return this.store?.attachmentsDir(this.session.id);
   }
 
   /** The live transcript for the current session. */
@@ -188,17 +199,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this.context.globalState.get<boolean>(REDACT_KEY) ?? false;
   }
 
+  /**
+   * The effort for the current provider, or 'default' when it has none or the stored
+   * value isn't one it accepts. The setting is global, so this validation is what keeps
+   * a Claude-only 'max' from being sent to Codex (which rejects it) after a switch.
+   */
   private get effort(): string {
     const provider = getProvider(this.providerId);
     const stored = this.context.globalState.get<string>(EFFORT_KEY);
-    return stored && provider.efforts.includes(stored) ? stored : 'default';
+    return stored && provider.efforts?.includes(stored) ? stored : 'default';
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
     view.webview.options = { enableScripts: true };
     view.webview.html = this.getHtml();
-    view.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
+    // onMessage is async and its result is floating, so an throw here would otherwise be
+    // an unhandled rejection — and if it happened mid-turn the spinner would never stop.
+    view.webview.onDidReceiveMessage((msg) => {
+      void this.onMessage(msg).catch((e: unknown) => {
+        this.notifyError(`sema: ${(e as Error).message}`);
+        view.webview.postMessage({ type: 'assistantEnd' });
+      });
+    });
     // Re-check sign-in state when the panel regains focus (e.g. after logging in
     // via the terminal) or when the login terminal is closed.
     view.onDidChangeVisibility(() => {
@@ -219,6 +242,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.persist();
     this.controller?.abort();
     this.session = createSession(this.providerId, this.modelId);
+    // Composer chips were staged under the old session's directory, so they can't
+    // carry over; gcOrphans sweeps their bytes.
+    this.clearPending();
     this.applyUsage(freshUsage());
     void this.context.workspaceState.update(ACTIVE_SESSION_KEY, undefined);
     this.view?.webview.postMessage({ type: 'clear' });
@@ -275,6 +301,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     this.controller?.abort();
     this.session = loaded;
+    this.clearPending();
     this.applyUsage(loaded.usage);
     void this.context.workspaceState.update(ACTIVE_SESSION_KEY, loaded.id);
     this.restoreToWebview();
@@ -287,6 +314,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (id === this.session.id) {
       this.controller?.abort();
       this.session = createSession(this.providerId, this.modelId);
+      this.clearPending();
       this.applyUsage(freshUsage());
       void this.context.workspaceState.update(ACTIVE_SESSION_KEY, undefined);
       this.view?.webview.postMessage({ type: 'clear' });
@@ -310,7 +338,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private restoreToWebview(): void {
     this.view?.webview.postMessage({
       type: 'restore',
-      messages: this.session.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: this.session.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        attachments: m.attachments ?? [],
+      })),
     });
   }
 
@@ -492,6 +524,108 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
+  // ── attachments ───────────────────────────────────────────────────────────
+  /** Push the composer's current chips to the webview. */
+  private sendPending(): void {
+    this.view?.webview.postMessage({ type: 'attachments', items: this.pending });
+  }
+
+  /**
+   * Stage one file and add it to the composer. All three ingest routes (picker, drop,
+   * paste) land here, so limits, sniffing, and capability checks are enforced once.
+   */
+  private async addAttachment(name: string, bytes: Uint8Array): Promise<void> {
+    const dir = this.attachmentsDir;
+    if (!dir) {
+      this.notifyError('Attachments need extension storage, which is unavailable.');
+      return;
+    }
+    const staged = await stage(dir, name, bytes);
+    if ('error' in staged) {
+      this.notifyError(`sema: ${staged.error}`);
+      return;
+    }
+    const att = staged.attachment;
+    // Anything we reject below has already been written to disk, so bin it rather than
+    // leave bytes behind that only the 24h orphan sweep would ever reach.
+    const reject = async (message: string): Promise<void> => {
+      await unstage(dir, att.id);
+      this.notifyError(message);
+    };
+
+    // Refuse up front rather than letting the model silently not see it. Historical
+    // attachments degrade instead — see materialize().
+    const provider = getProvider(this.providerId);
+    if (!provider.accepts(this.modelId).includes(att.kind)) {
+      await reject(
+        `sema: ${att.name} — ${provider.label} (${this.modelId}) can't read ${att.kind} attachments. ` +
+          'Pick a different model, or remove the file.',
+      );
+      return;
+    }
+    if (this.redact && att.kind !== 'text') {
+      await reject(
+        `sema: ${att.name} can't be sent with redact on — redaction only works on text. ` +
+          'Turn redact off to send it.',
+      );
+      return;
+    }
+
+    const budget = totalBytes(this.history) + this.pending.reduce((s, a) => s + a.size, 0);
+    if (budget + att.size > LIMITS.total) {
+      await reject(
+        `sema: ${att.name} would push this conversation past the ${formatSize(LIMITS.total)} ` +
+          'attachment budget. Start a new chat, or remove some files.',
+      );
+      return;
+    }
+
+    this.pending.push(att);
+    this.sendPending();
+  }
+
+  /** Read a file from disk (picker / drag from the Explorer) and attach it. */
+  private async attachUris(uris: readonly vscode.Uri[]): Promise<void> {
+    for (const uri of uris) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        await this.addAttachment(path.basename(uri.fsPath), bytes);
+      } catch (e) {
+        this.notifyError(`sema: could not read ${uri.fsPath}: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  /** Open the native picker. Public so the Explorer context-menu command can reuse it. */
+  async attachViaDialog(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      openLabel: 'Attach',
+      title: 'Attach files to the sema chat',
+    });
+    if (picked?.length) {
+      await this.attachUris(picked);
+    }
+  }
+
+  /** Reveal the chat panel and attach the given files (Explorer context menu). */
+  async attachFromExplorer(uris: readonly vscode.Uri[]): Promise<void> {
+    // Focusing the view resolves the webview if it hasn't been shown yet, so the chips
+    // have somewhere to render.
+    await vscode.commands.executeCommand('semaChat.focus');
+    await this.attachUris(uris);
+  }
+
+  private notifyError(message: string): void {
+    this.view?.webview.postMessage({ type: 'error', message });
+  }
+
+  /** Drop the composer's staged files (their bytes are swept later by gcOrphans). */
+  private clearPending(): void {
+    this.pending = [];
+    this.sendPending();
+  }
+
   // ── message handling ──────────────────────────────────────────────────────
   private async onMessage(msg: { type: string; [k: string]: unknown }): Promise<void> {
     switch (msg.type) {
@@ -499,7 +633,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.sendConfig();
         this.restoreToWebview();
         this.sendSessions();
+        this.sendPending();
         void this.refreshAuthState();
+        break;
+      case 'attach':
+        await this.attachViaDialog();
+        break;
+      case 'attachUris':
+        // Dropped from the VS Code Explorer or a file manager — a text/uri-list payload.
+        await this.attachUris(
+          (msg.uris as string[] | undefined)?.map((u) => vscode.Uri.parse(u)) ?? [],
+        );
+        break;
+      case 'attachData':
+        // Pasted from the clipboard — the one route with no path, so bytes come inline.
+        await this.addAttachment(
+          String(msg.name ?? 'pasted'),
+          Buffer.from(String(msg.data ?? ''), 'base64'),
+        );
+        break;
+      case 'removeAttachment':
+        this.pending = this.pending.filter((a) => a.id !== String(msg.id));
+        this.sendPending();
         break;
       case 'send':
         await this.handleSend(String(msg.text ?? ''));
@@ -613,7 +768,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           ...p.modelInfos,
           ...this.customModels(p.id).map((id) => ({ id, name: id, section: 'Custom' })),
         ],
-        efforts: p.efforts,
+        // Empty for providers with no effort control — the picker stays hidden.
+        efforts: p.efforts ?? [],
       })),
       provider: provider.id,
       model: this.modelId,
@@ -630,7 +786,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async handleSend(text: string): Promise<void> {
     const view = this.view;
-    if (!view || !text.trim()) {
+    // An attachment with no typed text is a valid turn ("what's wrong with this screenshot?").
+    if (!view || (!text.trim() && !this.pending.length)) {
       return;
     }
     const provider = getProvider(this.providerId);
@@ -648,15 +805,35 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    this.history.push({ role: 'user', content: text });
-    view.webview.postMessage({ type: 'userMessage', text });
+    // Images and PDFs can't be scrubbed, and the UI claims "Redacted before sending"
+    // once redaction runs — so refuse rather than ship unscrubbable bytes under that
+    // banner. Text attachments are redacted below like any other text.
+    const binary = this.pending.filter((a) => a.kind !== 'text');
+    if (this.redact && binary.length) {
+      view.webview.postMessage({
+        type: 'error',
+        message:
+          `Redaction can't scrub ${binary.map((a) => a.name).join(', ')} — its contents are ` +
+          'not text. Turn redact off to send it, or remove the file.',
+      });
+      return;
+    }
+
+    const attachments = this.pending;
+    this.history.push({
+      role: 'user',
+      content: text,
+      attachments: attachments.length ? attachments : undefined,
+    });
+    view.webview.postMessage({ type: 'userMessage', text, attachments });
+    this.clearPending();
 
     this.controller = new AbortController();
 
     // API providers can't read files, so retrieve code and inject it (RAG).
     // CLI providers read the repo themselves — send the prompt directly, like Cursor.
     let context = '';
-    if (this.useIndex) {
+    if (this.useIndex && text.trim()) {
       view.webview.postMessage({ type: 'status', text: 'searching sema index…' });
       const client = this.makeClient();
       if (client) {
@@ -682,20 +859,48 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // PII redaction (opt-in): scrub secrets/PII from everything sent to the model.
+    // Resolve attachments for the model actually selected: inline text into the prompt,
+    // and swap out any image/PDF this model can't read for a placeholder. Historical
+    // attachments are the reason this runs over the whole transcript — the composer
+    // refuses unsupported *new* files, but a file attached before a provider switch is
+    // already in the history and would otherwise be replayed to a model that 400s on it.
+    //
+    // Redaction narrows the same set rather than adding a second rule: an image
+    // attached while redact was off is still in the history, and replaying it on a
+    // redacted turn would ship unscrubbable bytes under the "Redacted before sending"
+    // banner. Treating redact-on as "this model reads text only" degrades those the
+    // same way a provider switch does.
+    const accepts = this.redact
+      ? provider.accepts(this.modelId).filter((k) => k === 'text')
+      : provider.accepts(this.modelId);
+    const mat = await materialize(this.history, {
+      dir: this.attachmentsDir ?? '',
+      accepts,
+      reason: this.redact ? "redaction can't scrub it" : undefined,
+    });
+    for (const w of mat.warnings) {
+      view.webview.postMessage({ type: 'notice', text: `⚠ ${w}` });
+    }
+
+    // PII redaction (opt-in): scrub secrets/PII from everything sent to the model. Runs
+    // after materialize so that text pulled in from attachments is scrubbed too; binary
+    // attachments were rejected above, so no base64 can reach the redactor (its EMAIL
+    // and card-number patterns would match inside a base64 blob).
     let outContext = context;
-    let outMessages: ChatMessage[] = this.history;
+    let outMessages: ChatMessage[] = mat.messages;
     if (this.redact) {
       view.webview.postMessage({ type: 'status', text: 'redacting sensitive data…' });
       const semaBin = vscode.workspace.getConfiguration('sema').get<string>('binaryPath') || 'sema';
-      const pieces = [context, ...this.history.map((m) => m.content)];
+      const pieces = [context, ...mat.messages.map((m) => m.content)];
       const res = await redactPieces(pieces, {
         semaBin,
         cwd: this.repoRoot,
         signal: this.controller.signal,
       });
       outContext = res.pieces[0] ?? context;
-      outMessages = this.history.map((m, i) => ({ role: m.role, content: res.pieces[i + 1] ?? m.content }));
+      // Spread rather than rebuild: `attachments` must survive redaction, or every
+      // image would be silently dropped whenever the redact toggle is on.
+      outMessages = mat.messages.map((m, i) => ({ ...m, content: res.pieces[i + 1] ?? m.content }));
       const summary = redactionSummary(res.found);
       if (summary) {
         view.webview.postMessage({ type: 'notice', text: `🛡 Redacted before sending: ${summary}.` });
@@ -740,10 +945,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         agent,
         plan,
         semaBin: cfg.get<string>('binaryPath') || 'sema',
-        effort: this.effort,
+        // Only providers that declare an effort argument get one.
+        effort: provider.efforts ? this.effort : undefined,
         model: this.modelId,
         system: buildSystem(outContext, provider.readsWorkspace, this.mode),
         messages: outMessages,
+        attachmentsDir: this.attachmentsDir,
         maxTokens,
         signal: this.controller.signal,
         sessionId: resumeId,
@@ -776,6 +983,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.history.pop();
         this.session.cliSessionId = undefined;
         this.session.cliSessionProvider = undefined;
+        // The turn is gone, so put its text and files back in the composer — otherwise
+        // the chips are already cleared and the attachments are unrecoverable.
+        this.pending = attachments;
+        this.sendPending();
+        view.webview.postMessage({ type: 'restoreInput', text });
         const raw = (err as Error).message;
         view.webview.postMessage({ type: 'error', message: describeError(err) });
         // Not signed in? Offer a one-click login for the CLI providers.
@@ -860,6 +1072,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   // ── webview html ──────────────────────────────────────────────────────────
   private getHtml(): string {
     const nonce = getNonce();
+    // Attachment chips use inline SVG icons rather than image thumbnails, so no img-src
+    // is needed — and a 5MB screenshot never has to cross the IPC boundary as base64
+    // just to render a 40px preview.
     const csp =
       "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-" + nonce + "';";
     return `<!DOCTYPE html>
@@ -925,6 +1140,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   #composer { margin: 0 10px 10px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
   #composer:focus-within { border-color: var(--vscode-focusBorder); }
+  #composer.drop { border-color: var(--vscode-focusBorder); border-style: dashed; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips:empty { display: none; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 3px 6px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-textBlockQuote-background); font-size: 11px; }
+  .chip svg { width: 12px; height: 12px; flex: none; opacity: .8; }
+  .chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .sz { color: var(--vscode-descriptionForeground); flex: none; }
+  .chip .x { flex: none; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 13px; line-height: 1; }
+  .chip .x:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-foreground); }
+  .msg .chips { margin-top: 6px; justify-content: flex-end; }
   #input { resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; padding: 2px 4px; font-family: inherit; font-size: var(--vscode-font-size); line-height: 1.5; max-height: 160px; overflow-y: auto; }
   #toolbar { display: flex; align-items: center; gap: 6px; }
   #controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
@@ -996,9 +1221,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="status"></div>
   <div id="composer">
+    <div id="chips" class="chips"></div>
     <textarea id="input" rows="1" placeholder="Ask about your codebase…   (Enter to send · Shift+Enter for newline)"></textarea>
     <div id="toolbar">
       <div id="controls">
+        <button id="attach" title="Attach a file (or paste / drop one here)">📎</button>
         <select id="provider" title="Provider"></select>
         <select id="model" title="Model"></select>
         <select id="mode" title="Ask = read-only Q&amp;A · Plan = propose a plan (no edits) · Agent = make changes">
@@ -1033,6 +1260,85 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var curDefaults = {}, curProvider = '';
     function modelIdOf(model){ if (!model || model === '__custom__') return ''; if (model === 'default' && curDefaults[curProvider]) return curDefaults[curProvider]; return model; }
     function showSelectedModel(model){ modelInfo.textContent = modelIdOf(model); }
+    var composerEl = document.getElementById('composer');
+    var chipsEl = document.getElementById('chips');
+    var attachBtn = document.getElementById('attach');
+    var ICON_IMAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>';
+    var ICON_PDF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>';
+    var ICON_TEXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8M8 17h5"></path></svg>';
+    function iconFor(kind){ return kind === 'image' ? ICON_IMAGE : (kind === 'pdf' ? ICON_PDF : ICON_TEXT); }
+    function fmtSize(n){
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return Math.round(n / 1024) + ' KB';
+      return (n / 1048576).toFixed(1) + ' MB';
+    }
+    // Build one chip. The filename goes in via textContent — a file called
+    // "<img src=x onerror=alert(1)>" must never reach innerHTML.
+    function makeChip(a, onRemove){
+      var c = document.createElement('span'); c.className = 'chip';
+      var ic = document.createElement('span'); ic.innerHTML = iconFor(a.kind); c.appendChild(ic.firstChild);
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = a.name; nm.title = a.name; c.appendChild(nm);
+      var sz = document.createElement('span'); sz.className = 'sz'; sz.textContent = fmtSize(a.size); c.appendChild(sz);
+      if (onRemove){
+        var x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove';
+        x.addEventListener('click', function(){ onRemove(a.id); });
+        c.appendChild(x);
+      }
+      return c;
+    }
+    var pendingCount = 0;
+    function renderPending(items){
+      chipsEl.innerHTML = '';
+      pendingCount = (items || []).length;
+      (items || []).forEach(function(a){
+        chipsEl.appendChild(makeChip(a, function(id){ vscode.postMessage({type:'removeAttachment', id:id}); }));
+      });
+    }
+    // Chips under a sent turn, read-only.
+    function attachRow(items){
+      var row = document.createElement('div'); row.className = 'chips';
+      items.forEach(function(a){ row.appendChild(makeChip(a, null)); });
+      return row;
+    }
+    attachBtn.addEventListener('click', function(){ vscode.postMessage({type:'attach'}); });
+    // Paste is the one route with no path — the bytes only exist in page context.
+    input.addEventListener('paste', function(e){
+      var files = (e.clipboardData && e.clipboardData.files) || [];
+      if (!files.length) return;
+      e.preventDefault();
+      for (var i = 0; i < files.length; i++){
+        (function(f){
+          var r = new FileReader();
+          r.onload = function(){
+            var s = String(r.result); var comma = s.indexOf(',');
+            vscode.postMessage({type:'attachData', name: f.name || 'pasted-image.png', data: s.slice(comma + 1)});
+          };
+          r.readAsDataURL(f);
+        })(files[i]);
+      }
+    });
+    // Drops from the VS Code Explorer or a file manager carry paths; the host reads them.
+    composerEl.addEventListener('dragover', function(e){ e.preventDefault(); composerEl.classList.add('drop'); });
+    composerEl.addEventListener('dragleave', function(){ composerEl.classList.remove('drop'); });
+    composerEl.addEventListener('drop', function(e){
+      e.preventDefault(); composerEl.classList.remove('drop');
+      var list = e.dataTransfer && e.dataTransfer.getData('text/uri-list');
+      if (list){
+        var uris = list.split('\\n').map(function(s){ return s.trim(); }).filter(function(s){ return s && s[0] !== '#'; });
+        if (uris.length){ vscode.postMessage({type:'attachUris', uris:uris}); return; }
+      }
+      var files = (e.dataTransfer && e.dataTransfer.files) || [];
+      for (var i = 0; i < files.length; i++){
+        (function(f){
+          var r = new FileReader();
+          r.onload = function(){
+            var s = String(r.result); var comma = s.indexOf(',');
+            vscode.postMessage({type:'attachData', name: f.name, data: s.slice(comma + 1)});
+          };
+          r.readAsDataURL(f);
+        })(files[i]);
+      }
+    });
     var indexChk = document.getElementById('indexchk');
     var useIndex = false;
     function applyIndexBtn(){ indexChk.checked = useIndex; }
@@ -1122,16 +1428,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       messagesEl.appendChild(wrap); messagesEl.scrollTop = messagesEl.scrollHeight; return b;
     }
     // Re-render a stored message (assistant text goes through the markdown renderer).
-    function renderMessage(role, content){
-      if (role === 'assistant'){ addBubble('assistant').innerHTML = render(content); }
-      else { addBubble(role).textContent = content; }
+    function renderMessage(role, content, attachments){
+      if (role === 'assistant'){ addBubble('assistant').innerHTML = render(content); return; }
+      var b = addBubble(role);
+      b.textContent = content;
+      if (attachments && attachments.length){ b.appendChild(attachRow(attachments)); }
     }
     var ICON_SEND = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V7"></path><path d="M6.5 12.5 L12 7 L17.5 12.5"></path></svg>';
     var ICON_STOP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"></rect></svg>';
     function setStreaming(on){ streaming = on; sendBtn.innerHTML = on ? ICON_STOP : ICON_SEND; sendBtn.title = on ? 'Stop' : 'Send'; }
     function doSend(){
       if (streaming){ vscode.postMessage({type:'stop'}); return; }
-      var text = input.value.trim(); if (!text) return;
+      // An attachment on its own is a valid turn, so don't require text.
+      var text = input.value.trim(); if (!text && !pendingCount) return;
       input.value = ''; autogrow(); setStreaming(true); vscode.postMessage({type:'send', text:text});
     }
 
@@ -1225,7 +1534,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         if (m.mode) { modeSel.value = m.mode; }
         effortSel.innerHTML = '';
-        var efforts = (cur && cur.efforts) ? cur.efforts : ['default'];
+        var efforts = (cur && cur.efforts) ? cur.efforts : [];
         efforts.forEach(function(ef){ var o = document.createElement('option'); o.value = ef; var lbl = ef === 'xhigh' ? 'extra high' : ef; o.textContent = 'effort: ' + lbl; if (ef === m.effort) o.selected = true; effortSel.appendChild(o); });
         effortSel.style.display = efforts.length > 1 ? '' : 'none';
         if (typeof m.useIndex === 'boolean'){ useIndex = m.useIndex; applyIndexBtn(); }
@@ -1239,7 +1548,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         if (!m.canLogin){ loginBtn.style.display = 'none'; loggedInState = false; } else { loginBtn.style.display = ''; }
         showSelectedModel(m.model);
-      } else if (m.type === 'userMessage'){ hideEmpty(); addBubble('user').textContent = m.text; }
+      } else if (m.type === 'userMessage'){ hideEmpty(); renderMessage('user', m.text, m.attachments); }
+      else if (m.type === 'attachments'){ renderPending(m.items); }
+      else if (m.type === 'restoreInput'){ input.value = m.text || ''; autogrow(); }
       else if (m.type === 'status'){ statusEl.textContent = m.text; }
       else if (m.type === 'context'){ hideEmpty(); var cdt=document.createElement('details'); cdt.className='ctx'; cdt.open=true; var csm=document.createElement('summary'); var cn=m.items.length; csm.textContent='🔎 sema context — '+cn+' result'+(cn===1?'':'s')+' (click to open)'; cdt.appendChild(csm); var cbd=document.createElement('div'); cbd.className='ctx-body'; m.items.forEach(function(it){ var row=document.createElement('div'); row.className='ctx-item'; row.textContent=it.file+':'+it.line+'  '+it.type+' '+it.name; row.title='Open '+it.file+':'+it.line; row.addEventListener('click', function(){ vscode.postMessage({type:'openFile', file:it.file, line:it.line}); }); cbd.appendChild(row); }); cdt.appendChild(cbd); messagesEl.appendChild(cdt); messagesEl.scrollTop=messagesEl.scrollHeight; }
       else if (m.type === 'assistantStart'){ hideEmpty(); if (revealTimer && answerEl && shownLen < answerRaw.length){ answerEl.innerHTML = render(answerRaw); } if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = addBubble('assistant'); curEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>'; answerEl=null; traceEl=null; answerRaw=''; thinkBody=null; started=false; shownLen=0; setStreaming(true); statusEl.textContent = ''; }
@@ -1253,7 +1564,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       else if (m.type === 'restore'){
         messagesEl.innerHTML = ''; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; }
         curEl = null; answerEl = null; traceEl = null; answerRaw = ''; thinkBody = null; started = false; shownLen = 0; setStreaming(false); statusEl.textContent = '';
-        if (m.messages && m.messages.length){ hideEmpty(); m.messages.forEach(function(x){ renderMessage(x.role, x.content); }); }
+        if (m.messages && m.messages.length){ hideEmpty(); m.messages.forEach(function(x){ renderMessage(x.role, x.content, x.attachments); }); }
         else if (emptyEl){ emptyEl.style.display = ''; }
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }

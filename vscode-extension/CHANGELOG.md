@@ -3,6 +3,76 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.6.5]
+
+### Added
+- **File attachments across every provider.** Attach images, PDFs, and text files to a
+  chat turn with **📎**, by pasting a screenshot, by dropping a file on the composer, or
+  from the Explorer context menu (`sema: Attach file to chat`). Each provider receives
+  the file in its native form — Anthropic `image`/`document` content blocks, OpenAI
+  `image_url`/`file` content parts, and real files on disk for the local CLIs (`codex -i`,
+  `opencode -f`, and an allow-listed path for Claude Code's Read tool). Text files are
+  inlined into the prompt, so they work on every model including text-only ones.
+- Attachment support is tracked **per model**, not per provider — the gateways (opencode,
+  OpenRouter, Together) front both vision and text-only models, so a single per-provider
+  flag would promise vision a model doesn't have. Attaching a type the selected model
+  can't read is refused up front with an explanation; attachments already in the history
+  degrade to a text placeholder when you switch to a model that can't read them, so
+  switching provider mid-conversation no longer breaks the turn.
+- Attached text files are covered by the **redact** toggle. Images and PDFs can't be
+  scrubbed, so redact-on refuses them rather than sending unscrubbable bytes under a
+  "redacted" banner.
+- First unit tests for the extension (`npm test`, via `node --test`).
+
+### Changed
+- **Reasoning effort is now per-CLI, and only where it exists.** The picker appears only
+  for Claude Code and Codex — the two providers whose CLI takes an effort argument — and
+  each now offers exactly what its own CLI accepts, verified by running every level
+  end-to-end against both CLIs:
+  - **Claude Code** (`--effort`): low / medium / high / xhigh / **max**
+  - **Codex** (`-c model_reasoning_effort=`): **none** / low / medium / high / xhigh
+
+  The sets are not interchangeable: Codex fails to parse Claude's `max` ("unknown variant
+  `max`"), and Claude warns and falls back to its default on Codex's `minimal`. Codex's
+  `none` was previously missing and does work. Codex's `minimal` is deliberately *not*
+  offered — its parser accepts it, but a real run returns HTTP 400 ("The following tools
+  cannot be used with reasoning.effort 'minimal': image_gen, web_search"), so it could
+  never succeed. Anthropic, OpenAI, DeepSeek, OpenRouter,
+  Together, and opencode no longer declare an effort at all — it's a CLI flag, not an API
+  parameter — so they hide the picker and are never sent one. The stored effort is
+  validated against the active provider, so switching from Claude Code (`max`) to Codex
+  falls back to `default` instead of erroring.
+
+### Fixed
+- Redaction rebuilt each turn as `{role, content}`, dropping any per-turn metadata; it
+  now preserves the whole message, so attachments survive with the **redact** toggle on.
+- **The resolved "Default (…)" model is no longer stale after a failed run.** The model a
+  CLI resolves for `Default` was only read on a successful exit, so a failing run left the
+  picker showing whatever an earlier run had resolved — e.g. it read `Default (gpt-5.5)`
+  while the error said `The 'gpt-5.6-terra' model requires a newer version of Codex`. The
+  model is now resolved regardless of exit status, so the picker and the error agree.
+  (Note `Default` sends no `-m`: Codex picks server-side and can choose a model newer than
+  your CLI. Select an explicit model — e.g. GPT-5.5 — to pin it.)
+- **Codex failures now report the real error.** `CodexProvider` ignored the `turn.failed`
+  event carrying the upstream message, so a failed run surfaced whatever landed last on
+  stderr instead — typically an unrelated `codex_models_manager::cache: failed to load
+  models cache: unknown variant 'max'` warning, which hid the actionable cause (e.g.
+  "The 'gpt-5.6-terra' model requires a newer version of Codex. Please upgrade…"). Codex
+  nests the upstream error as a JSON string inside `error.message`; that is now unwrapped
+  and shown.
+- **opencode attachment support is now per-model.** opencode is a gateway to ~55 models,
+  so claiming image support for all of them meant attaching a screenshot on the
+  **Default** model produced a silent "I cannot view images" reply — Default resolves to
+  opencode's own configured model, commonly the free, text-only `opencode/big-pickle`.
+  Vision models (Claude, Gemini, GPT) declare image/PDF support; text-only ones
+  (DeepSeek, GLM, Qwen, Kimi, MiniMax) declare text; **Default** is treated as text-only,
+  because opencode reports no resolved model id in its JSON stream. Attaching an image
+  on a model that can't read it is now refused up front, as it already was for
+  OpenRouter and Together.
+- Staged attachments now keep a canonical file extension (`<id>.png`), derived from the
+  sniffed media type rather than the supplied filename, so a staged file identifies
+  itself to tools and in activity traces.
+
 ## [0.5.0]
 
 ### Added

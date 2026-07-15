@@ -2,7 +2,8 @@ import { spawn } from 'child_process';
 import { promises as fs, Dirent } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ChatMessage, ChatProvider, ModelInfo, StreamOptions, TokenUsage } from './types';
+import { Attachment, AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions, TokenUsage } from './types';
+import { pathFor } from '../attachments';
 
 /** Flatten the system context + conversation into a single prompt string for a CLI. */
 function flattenPrompt(system: string, messages: ChatMessage[]): string {
@@ -20,6 +21,57 @@ function flattenPrompt(system: string, messages: ChatMessage[]): string {
     }
   }
   return parts.join('\n').trim();
+}
+
+/**
+ * The attachments a CLI needs for this invocation.
+ *
+ * Turn-scoped, mirroring how the prompt itself is built: on `--resume` the CLI already
+ * holds the earlier turns and we send only the newest one, so re-sending every previous
+ * turn's files would duplicate them. A fresh run replays the whole transcript — which
+ * is also the path taken after an error clears the resume handle — so it needs them all.
+ */
+function attachmentsFor(opts: StreamOptions): Attachment[] {
+  const turns = opts.sessionId ? opts.messages.slice(-1) : opts.messages;
+  return turns.flatMap((m) => m.attachments ?? []);
+}
+
+/** Absolute staged paths for the given attachments, optionally filtered to one kind. */
+function pathsOf(opts: StreamOptions, atts: Attachment[], kind?: AttachmentKind): string[] {
+  const dir = opts.attachmentsDir;
+  if (!dir) {
+    return [];
+  }
+  return atts.filter((a) => !kind || a.kind === kind).map((a) => pathFor(dir, a.id));
+}
+
+/**
+ * Build the prompt for a CLI that reads attachments off disk by path (Claude Code).
+ * Also covers the attachment-only turn: `flattenPrompt` would return an empty string,
+ * which would then be spawned as an empty positional argument and rejected.
+ */
+function promptWithPaths(opts: StreamOptions, paths: string[]): string {
+  const base = opts.sessionId
+    ? opts.messages[opts.messages.length - 1]?.content ?? ''
+    : flattenPrompt(opts.system, opts.messages);
+  if (!paths.length) {
+    return base;
+  }
+  const list = paths.map((p) => `- ${p}`).join('\n');
+  const lead = base.trim()
+    ? `${base}\n\nAttached file(s) — read them before answering:`
+    : 'Look at the attached file(s):';
+  return `${lead}\n${list}`;
+}
+
+/** Fallback text so an attachment-only turn never spawns an empty prompt argument. */
+function promptOrDefault(prompt: string, atts: Attachment[]): string {
+  if (prompt.trim()) {
+    return prompt;
+  }
+  return atts.length
+    ? `Look at the attached file(s): ${atts.map((a) => a.name).join(', ')}`
+    : prompt;
 }
 
 function basename(p: unknown): string {
@@ -61,9 +113,12 @@ abstract class CliProvider implements ChatProvider {
   abstract readonly label: string;
   abstract readonly modelInfos: ModelInfo[];
   abstract readonly defaultModel: string;
-  abstract readonly efforts: string[];
+  /** Only the CLIs with an effort argument declare this — see ChatProvider.efforts. */
+  readonly efforts?: readonly string[];
   readonly requiresKey = false;
   readonly readsWorkspace = true;
+
+  abstract accepts(model: string): readonly AttachmentKind[];
 
   /** Flat model-id list, derived from the rich modelInfos. */
   get models(): string[] {
@@ -194,14 +249,25 @@ abstract class CliProvider implements ChatProvider {
       });
 
       child.on('close', (code) => {
-        if (opts.signal.aborted) {
-          resolve();
-        } else if (errText) {
-          reject(new Error(errText));
-        } else if (code !== 0) {
-          reject(new Error(stderr.trim().split('\n').pop() || `${bin} exited with code ${code}`));
-        } else if (!reportedModel && opts.onModel) {
-          // The stream carried no model (Codex); resolve it out-of-band, then finish.
+        const finish = (): void => {
+          if (opts.signal.aborted) {
+            resolve();
+          } else if (errText) {
+            reject(new Error(errText));
+          } else if (code !== 0) {
+            reject(new Error(stderr.trim().split('\n').pop() || `${bin} exited with code ${code}`));
+          } else {
+            resolve();
+          }
+        };
+        if (!reportedModel && opts.onModel && !opts.signal.aborted) {
+          // The stream carried no model (Codex); resolve it out-of-band.
+          //
+          // This runs before the success/failure branch on purpose: a run that *fails*
+          // still resolved a model, and that is exactly when the user needs to know
+          // which one. Reporting only on exit 0 left the picker showing a stale
+          // "Default (…)" from some earlier successful run, contradicting an error
+          // naming the model Codex actually chose.
           this.resolveModelAfterStream(resolvedSession, opts)
             .then((m) => {
               if (m && opts.onModel) {
@@ -209,9 +275,9 @@ abstract class CliProvider implements ChatProvider {
               }
             })
             .catch(() => {})
-            .finally(() => resolve());
+            .finally(finish);
         } else {
-          resolve();
+          finish();
         }
       });
     });
@@ -232,12 +298,29 @@ export class ClaudeCodeProvider extends CliProvider {
     { id: 'haiku', alias: 'haiku', name: 'Haiku 4.5' },
   ];
   readonly defaultModel = 'default';
-  // `claude --effort` accepts low/medium/high/xhigh/max ('default' = the CLI's own).
+  // Mirrors `claude --help`: "--effort <level>  Effort level for the current session
+  // (low, medium, high, xhigh, max)". 'max' is Claude-only — Codex rejects it.
+  // 'default' means pass no --effort and let the CLI decide.
   readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
   readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'status'] };
 
+  /** Claude Code's Read tool handles images and PDFs as well as text. */
+  accepts(): readonly AttachmentKind[] {
+    return ['image', 'pdf', 'text'];
+  }
+
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
-    const args = ['-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose'];
+    const atts = attachmentsFor(opts);
+    const paths = pathsOf(opts, atts);
+    const args: string[] = [];
+    if (paths.length && opts.attachmentsDir) {
+      // Claude Code has no attach flag, so we hand it absolute paths in the prompt and
+      // let its Read tool open them — which needs the staged dir allow-listed, since it
+      // lives outside the workspace. `--add-dir` takes <directories...>, so it MUST be
+      // followed by another flag: left last it swallows the trailing prompt argument.
+      args.push('--add-dir', opts.attachmentsDir);
+    }
+    args.push('-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose');
     if (opts.sessionId) {
       args.push('--resume', opts.sessionId);
     }
@@ -254,11 +337,9 @@ export class ClaudeCodeProvider extends CliProvider {
     if (opts.effort && opts.effort !== 'default') {
       args.push('--effort', opts.effort);
     }
-    // Fresh: system + full history. Resume: only the new user turn (the session holds the rest).
-    const prompt = opts.sessionId
-      ? opts.messages[opts.messages.length - 1]?.content ?? ''
-      : flattenPrompt(opts.system, opts.messages);
-    return { bin: 'claude', args, prompt };
+    // Fresh: system + full history. Resume: only the new user turn (the session holds
+    // the rest). Attachment paths are appended for whichever set of turns that covers.
+    return { bin: 'claude', args, prompt: promptWithPaths(opts, paths) };
   }
 
   protected extractDelta(event: unknown): string | null {
@@ -358,29 +439,57 @@ export class CodexProvider extends CliProvider {
   // Models per `codex debug models` (Codex CLI 0.133): gpt-5.5 / gpt-5.4 / gpt-5.4-mini.
   // (gpt-5.6-sol/terra/luna are OpenAI API models — they belong to the `openai` provider,
   // not the Codex CLI.) 'default' lets Codex pick its own configured model.
+  // Slugs per `codex debug models` (gpt-5.5 / gpt-5.4 / gpt-5.4-mini; codex-auto-review
+  // is an internal review model and is deliberately not offered).
+  //
+  // 'Default' passes no -m and lets Codex choose — which it does server-side, so it can
+  // resolve to a model this CLI doesn't know (currently gpt-5.6-terra, which needs a
+  // newer Codex). Pick an explicit model to pin it.
   readonly modelInfos: ModelInfo[] = [
-    { id: 'default', name: 'Default', description: 'Recommended by Codex', recommended: true },
+    {
+      id: 'default',
+      name: 'Default',
+      description: "Chosen by Codex server-side; may be newer than your CLI. Pick a model to pin it.",
+      recommended: true,
+    },
     { id: 'gpt-5.5', name: 'GPT-5.5' },
     { id: 'gpt-5.4', name: 'GPT-5.4' },
     { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
   ];
   readonly defaultModel = 'default';
-  // codex reasoning efforts per `codex debug models` (low/medium/high/xhigh; default
-  // = medium). Current models expose no 'minimal', and there is no 'max' (Claude-only).
-  readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh'];
+  // Codex has no --effort flag; effort is config, passed as
+  // `-c model_reasoning_effort=<level>`. Parsing locally is not enough to qualify a
+  // level, so each of these was run end-to-end against gpt-5.5:
+  //   none/low/medium/high/xhigh -> answer returned
+  //   minimal                    -> HTTP 400 "The following tools cannot be used with
+  //                                 reasoning.effort 'minimal': image_gen, web_search"
+  // So 'minimal' is omitted: the CLI's parser accepts it, but it is incompatible with
+  // the tools Codex enables, making it a guaranteed failure here. 'none' is kept — it
+  // works, despite `codex debug models` advertising only low/medium/high/xhigh.
+  // Claude Code's 'max' is absent because Codex's parser rejects it outright.
+  readonly efforts = ['default', 'none', 'low', 'medium', 'high', 'xhigh'];
   readonly auth = { login: ['login'], logout: ['logout'], status: ['login', 'status'] };
+
+  /** `codex exec` attaches images only (`-i`); its Read tool is text. No PDF path. */
+  accepts(): readonly AttachmentKind[] {
+    return ['image', 'text'];
+  }
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
     const effort =
       opts.effort && opts.effort !== 'default'
         ? ['-c', `model_reasoning_effort=${opts.effort}`]
         : [];
+    const atts = attachmentsFor(opts);
+    // `-i` takes <FILE>..., so one flag with many values would greedily swallow the
+    // trailing positionals — the session id and the prompt. Repeat the flag instead.
+    const images = pathsOf(opts, atts, 'image').flatMap((p) => ['-i', p]);
     if (opts.sessionId) {
       // Resume — the session keeps its model/sandbox; send only the new user turn.
       return {
         bin: 'codex',
-        args: ['exec', 'resume', '--json', '--skip-git-repo-check', ...effort, opts.sessionId],
-        prompt: opts.messages[opts.messages.length - 1]?.content ?? '',
+        args: ['exec', 'resume', '--json', '--skip-git-repo-check', ...effort, ...images, opts.sessionId],
+        prompt: promptOrDefault(opts.messages[opts.messages.length - 1]?.content ?? '', atts),
       };
     }
     const args = [
@@ -388,13 +497,18 @@ export class CodexProvider extends CliProvider {
       '--json',
       '--skip-git-repo-check',
       ...effort,
+      ...images,
       '--sandbox',
       opts.agent ? 'workspace-write' : 'read-only',
     ];
     if (opts.model && opts.model !== 'default') {
       args.push('-m', opts.model);
     }
-    return { bin: 'codex', args, prompt: flattenPrompt(opts.system, opts.messages) };
+    return {
+      bin: 'codex',
+      args,
+      prompt: promptOrDefault(flattenPrompt(opts.system, opts.messages), atts),
+    };
   }
 
   protected extractDelta(event: unknown): string | null {
@@ -463,8 +577,34 @@ export class CodexProvider extends CliProvider {
     return null;
   }
 
-  protected checkError(): string | null {
-    return null;
+  protected checkError(event: unknown): string | null {
+    const o = event as { type?: string; error?: { message?: string } };
+    if (o?.type !== 'turn.failed' && o?.type !== 'error') {
+      return null;
+    }
+    const raw = o.error?.message;
+    if (!raw) {
+      return o.type === 'turn.failed' ? 'Codex reported a failed turn.' : null;
+    }
+    return unwrapCodexError(raw);
+  }
+}
+
+/**
+ * Pull the human-readable message out of a Codex error.
+ *
+ * Codex nests the upstream API error as a JSON *string* inside `error.message`, e.g.
+ * `{"type":"error","status":400,"error":{"message":"The 'gpt-5.6-terra' model requires
+ * a newer version of Codex…"}}`. Surfacing that beats the alternative: Codex also logs
+ * unrelated warnings to stderr (a models-cache parse failure, say), and without this the
+ * run's only reported error is whatever line happened to land there last.
+ */
+function unwrapCodexError(raw: string): string {
+  try {
+    const o = JSON.parse(raw) as { error?: { message?: string }; message?: string };
+    return o.error?.message ?? o.message ?? raw;
+  } catch {
+    return raw; // not JSON — already human-readable
   }
 }
 
@@ -551,35 +691,56 @@ export class OpenCodeProvider extends CliProvider {
   readonly label = 'Open Code (local)';
   // Curated subset of `opencode models` (the opencode/ catalog has ~55); "+ custom id…"
   // reaches the rest. 'default' lets opencode use its own configured model.
+  // `accepts` marks what each model can actually read; entries without one fall back to
+  // image+text. 'default' is text-only — see accepts() below.
   readonly modelInfos: ModelInfo[] = [
-    { id: 'default', name: 'Default', recommended: true },
-    { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8' },
-    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
-    { id: 'opencode/claude-fable-5', name: 'Claude Fable 5' },
-    { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+    { id: 'default', name: 'Default', recommended: true, accepts: ['text'] },
+    { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/claude-fable-5', name: 'Claude Fable 5', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5', accepts: ['image', 'pdf', 'text'] },
     { id: 'opencode/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
-    { id: 'opencode/gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+    { id: 'opencode/gpt-5.6-sol', name: 'GPT-5.6 Sol', accepts: ['image', 'pdf', 'text'] },
     { id: 'opencode/gpt-5.4-mini', name: 'GPT-5.4 Mini' },
-    { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
-    { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash' },
-    { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (free)' },
-    { id: 'opencode/glm-5.2', name: 'GLM 5.2' },
-    { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus' },
-    { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro', accepts: ['text'] },
+    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (free)', accepts: ['text'] },
+    { id: 'opencode/glm-5.2', name: 'GLM 5.2', accepts: ['text'] },
+    { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus', accepts: ['text'] },
+    { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code', accepts: ['text'] },
     { id: 'opencode/grok-4.5', name: 'Grok 4.5' },
-    { id: 'opencode/minimax-m3', name: 'MiniMax M3' },
+    { id: 'opencode/minimax-m3', name: 'MiniMax M3', accepts: ['text'] },
   ];
   readonly defaultModel = 'default';
-  readonly efforts = ['default'];
+  // No `efforts`: `opencode run` exposes no reasoning-effort argument.
   readonly modelHint =
     'provider/model — run `opencode models` (e.g. anthropic/claude-sonnet-4-6, openai/gpt-5, opencode/gpt-5.1-codex)';
   readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'list'] };
 
+  /**
+   * `opencode run -f` will attach any file, but whether the *model* can read it is
+   * per-model — opencode is a gateway to ~55 of them, like OpenRouter and Together.
+   * Claiming vision for all of them means a silent "I cannot view images" reply from a
+   * text-only model instead of an up-front explanation.
+   *
+   * 'default' is treated as text-only on purpose: opencode resolves it from its own
+   * config (commonly a free, text-only model such as opencode/big-pickle) and reports
+   * no model id in its JSON stream, so there is nothing to inspect at runtime. Picking
+   * an explicit model from the dropdown is what unlocks images.
+   */
+  accepts(model: string): readonly AttachmentKind[] {
+    return this.modelInfos.find((m) => m.id === model)?.accepts ?? ['image', 'text'];
+  }
+
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
+    const atts = attachmentsFor(opts);
+    // `-f` is an array option, so repeat it per file and keep it ahead of another flag —
+    // a greedy array would otherwise absorb the trailing message positional.
+    const files = pathsOf(opts, atts).flatMap((p) => ['-f', p]);
     // --auto auto-approves permissions so a non-interactive run never hangs. Agent mode
     // uses the full-capability `build` agent; Ask/Plan use the read-only `plan` agent.
-    const args = ['run', '--format', 'json', '--auto', '--agent', opts.agent ? 'build' : 'plan'];
+    const args = ['run', ...files, '--format', 'json', '--auto', '--agent', opts.agent ? 'build' : 'plan'];
     if (opts.cwd) {
       // opencode's server-based run does NOT adopt the spawn cwd as its project root —
       // without this it works out of a temp dir. Point it at the workspace explicitly so
@@ -596,7 +757,7 @@ export class OpenCodeProvider extends CliProvider {
     const prompt = opts.sessionId
       ? opts.messages[opts.messages.length - 1]?.content ?? ''
       : flattenPrompt(opts.system, opts.messages);
-    return { bin: 'opencode', args, prompt };
+    return { bin: 'opencode', args, prompt: promptOrDefault(prompt, atts) };
   }
 
   protected extractDelta(event: unknown): string | null {

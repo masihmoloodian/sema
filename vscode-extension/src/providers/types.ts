@@ -1,6 +1,28 @@
+/** What a file attached to a turn is, from the model's point of view. */
+export type AttachmentKind = 'image' | 'pdf' | 'text';
+
+/**
+ * A file attached to a chat turn — metadata only. The bytes live on disk under the
+ * session's attachment directory, named by `id`, and are read at send time. Keeping
+ * them out of this object is what lets a session (and so SessionStore.list, which
+ * parses every session file on every turn) stay small.
+ */
+export interface Attachment {
+  /** Stable id; also the on-disk filename. Never derived from `name`. */
+  id: string;
+  /** Original filename — shown in the composer, and sent to OpenAI as `filename`. */
+  name: string;
+  kind: AttachmentKind;
+  mime: string;
+  /** Raw (pre-base64) size in bytes. */
+  size: number;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** Files attached to this turn. Absent on assistant turns. */
+  attachments?: Attachment[];
 }
 
 /** Rich metadata for one selectable model, powering the grouped model picker. */
@@ -17,6 +39,12 @@ export interface ModelInfo {
   recommended?: boolean;
   /** Optional group label; models sharing one render under an <optgroup>. */
   section?: string;
+  /**
+   * Attachment kinds this specific model can read, overriding the provider's default.
+   * Set it when one model in a provider's list differs from the rest (e.g. a text-only
+   * model on a provider whose other models have vision).
+   */
+  accepts?: readonly AttachmentKind[];
 }
 
 export interface TokenUsage {
@@ -61,6 +89,12 @@ export interface StreamOptions {
   onModel?: (model: string) => void;
   /** Reports token usage (and cost when available) for the turn. */
   onUsage?: (usage: TokenUsage) => void;
+  /**
+   * Directory holding this session's staged attachment files (named by `Attachment.id`).
+   * Providers resolve bytes/paths from here — see attachments.ts. Only image/pdf
+   * attachments reach a provider; text is inlined into `content` before the call.
+   */
+  attachmentsDir?: string;
 }
 
 export interface ChatProvider {
@@ -71,8 +105,13 @@ export interface ChatProvider {
   /** Rich model metadata (names, sections, recommended) for the picker. */
   readonly modelInfos: ModelInfo[];
   readonly defaultModel: string;
-  /** Reasoning effort levels this provider supports; 'default' first. Single entry = no effort control. */
-  readonly efforts: string[];
+  /**
+   * Reasoning-effort levels this provider's CLI accepts, 'default' first ('default' =
+   * pass no flag and let the CLI choose). Absent when the provider has no effort
+   * control at all — only the local Claude Code and Codex CLIs expose one, and their
+   * accepted values differ, so this list must mirror the CLI's own argument.
+   */
+  readonly efforts?: readonly string[];
   /** True for API-key providers; false for local-CLI providers that reuse an existing login. */
   readonly requiresKey: boolean;
   /** True if the provider reads the repo itself (agentic CLI); false if it needs injected RAG context. */
@@ -85,5 +124,12 @@ export interface ChatProvider {
   readonly modelHint?: string;
   /** CLI auth verbs (args for the provider's CLI). Absent for API-key providers. */
   readonly auth?: { login: string[]; logout: string[]; status: string[] };
+  /**
+   * Attachment kinds `model` can read. Per-model rather than per-provider: users add
+   * arbitrary custom model ids, and OpenRouter/Together list hundreds, so a single
+   * provider-wide flag would promise vision on text-only models. 'text' is always
+   * included — it inlines into the prompt, which every model can read.
+   */
+  accepts(model: string): readonly AttachmentKind[];
   stream(opts: StreamOptions): Promise<void>;
 }

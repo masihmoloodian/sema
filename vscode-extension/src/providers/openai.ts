@@ -16,6 +16,8 @@ export const openaiProvider = new OpenAICompatibleProvider({
   modelHint: 'e.g. gpt-5.6, gpt-5.5-pro, gpt-5.4-mini',
   models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   defaultModel: 'gpt-5.6-sol',
+  // The GPT-5 family is multimodal and reads PDFs via the `file` content part.
+  accepts: ['image', 'pdf', 'text'],
   prices: {
     'gpt-5.6-sol': { in: 5, cachedIn: 0.5, out: 30 },
     'gpt-5.6': { in: 5, cachedIn: 0.5, out: 30 }, // alias for gpt-5.6-sol

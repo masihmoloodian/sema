@@ -17,6 +17,8 @@ export const deepseekProvider = new OpenAICompatibleProvider({
   modelHint: 'e.g. deepseek-v4-pro, deepseek-v4-flash',
   models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   defaultModel: 'deepseek-v4-flash',
+  // No `accepts`: DeepSeek's API models are text-only, so images/PDFs are refused up
+  // front rather than 400-ing upstream.
   prices: {
     'deepseek-v4-flash': { in: 0.14, cachedIn: 0.0028, out: 0.28 },
     'deepseek-v4-pro': { in: 0.435, cachedIn: 0.003625, out: 0.87 },

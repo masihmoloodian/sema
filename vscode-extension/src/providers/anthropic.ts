@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ChatProvider, ModelInfo, StreamOptions } from './types';
+import { AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions } from './types';
 import { AGENT_TOOLS, READONLY_TOOLS, toAnthropicTools, executeTool, toolDetail, ToolContext } from './tools';
+import { readBase64 } from '../attachments';
 
 /** Public list prices (USD per 1M tokens) for cost estimation; unknown models get no estimate. */
 const PRICES: Record<string, { in: number; out: number }> = {
@@ -18,6 +19,66 @@ const CACHE_READ_MULTIPLIER = 0.1;
 
 /** Cap on agent tool-call rounds per turn — a backstop against a looping model. */
 const MAX_AGENT_STEPS = 50;
+
+/** Every current Claude model reads images and PDFs. */
+const ACCEPTS: readonly AttachmentKind[] = ['image', 'pdf', 'text'];
+
+/**
+ * Render a turn as content blocks. Attachments come first (the API expects `document`
+ * blocks ahead of the text that refers to them), text last. Plain string content when
+ * there is nothing attached, so the common case stays byte-identical to before.
+ *
+ * The last attachment block is marked `cache_control: ephemeral`: the full history is
+ * re-sent on every turn and on every agent-loop step, so without a breakpoint a 3MB
+ * screenshot is re-billed at full input price each round.
+ */
+async function toContent(
+  m: ChatMessage,
+  dir: string | undefined,
+): Promise<string | Anthropic.ContentBlockParam[]> {
+  const atts = m.attachments ?? [];
+  if (!atts.length || !dir) {
+    return m.content;
+  }
+  // Narrower than ContentBlockParam: only these three carry `cache_control`.
+  const blocks: (Anthropic.ImageBlockParam | Anthropic.DocumentBlockParam | Anthropic.TextBlockParam)[] = [];
+  for (const a of atts) {
+    const data = await readBase64(dir, a);
+    if (a.kind === 'pdf') {
+      blocks.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data },
+      });
+    } else if (a.kind === 'image') {
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: a.mime as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          data,
+        },
+      });
+    }
+  }
+  if (!blocks.length) {
+    return m.content;
+  }
+  blocks[blocks.length - 1].cache_control = { type: 'ephemeral' };
+  if (m.content.trim()) {
+    blocks.push({ type: 'text', text: m.content });
+  }
+  return blocks;
+}
+
+/** Map a whole transcript to Anthropic message params. */
+async function toMessages(
+  messages: readonly ChatMessage[],
+  dir: string | undefined,
+): Promise<Anthropic.MessageParam[]> {
+  return Promise.all(
+    messages.map(async (m) => ({ role: m.role, content: await toContent(m, dir) })),
+  );
+}
 
 /** Running token/cost totals, accumulated across a turn (which may span several tool steps). */
 interface UsageTotals {
@@ -52,12 +113,16 @@ export class AnthropicProvider implements ChatProvider {
     return this.models.map((id) => ({ id }));
   }
   readonly defaultModel = 'claude-opus-4-8';
-  readonly efforts = ['default'];
+  // No `efforts`: effort is a Claude Code / Codex CLI flag, not a Messages API parameter.
   readonly requiresKey = true;
   readonly readsWorkspace = false;
   readonly secretKey = 'sema.apiKey.anthropic';
   readonly keyHint = 'console.anthropic.com';
   readonly modelHint = 'e.g. claude-opus-4-8, claude-sonnet-5, claude-fable-5';
+
+  accepts(): readonly AttachmentKind[] {
+    return ACCEPTS;
+  }
 
   async stream(opts: StreamOptions): Promise<void> {
     const client = new Anthropic({ apiKey: opts.apiKey });
@@ -76,7 +141,7 @@ export class AnthropicProvider implements ChatProvider {
         model: opts.model,
         max_tokens: opts.maxTokens,
         system: opts.system,
-        messages: opts.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: await toMessages(opts.messages, opts.attachmentsDir),
       },
       { signal: opts.signal },
     );
@@ -100,10 +165,7 @@ export class AnthropicProvider implements ChatProvider {
     const readOnly = !opts.agent;
     const tools = toAnthropicTools(readOnly ? READONLY_TOOLS : AGENT_TOOLS);
     const ctx: ToolContext = { cwd: opts.cwd || process.cwd(), readOnly, semaBin: opts.semaBin };
-    const messages: Anthropic.MessageParam[] = opts.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const messages: Anthropic.MessageParam[] = await toMessages(opts.messages, opts.attachmentsDir);
     const totals = newTotals();
     let reportedModel = false;
 

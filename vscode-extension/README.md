@@ -113,7 +113,8 @@ CLI isn't on VS Code's PATH, set `sema.chat.claudePath` / `sema.chat.codexPath` 
 Open the **Chat** view, pick your provider, model, and a mode — **Ask** (read-only),
 **Plan** (propose a plan), or **Agent** (make changes) — and type. Toggle **index**
 on to feed sema's semantic context to the API providers, and **redact** on to strip
-PII/secrets before anything is sent.
+PII/secrets before anything is sent. Attach a screenshot, PDF, or file with **📎**
+(or paste / drag one onto the composer).
 
 <details>
 <summary>Optional — redact person &amp; location names too</summary>
@@ -130,9 +131,8 @@ python -m spacy download en_core_web_sm
 
 ## Features
 
-- **Chat** — a Cursor-style panel with provider, model, and reasoning-**effort**
-  pickers, plus **Ask** (read-only) / **Plan** (propose a plan) / **Agent** (take
-  actions) modes. Local CLI
+- **Chat** — a Cursor-style panel with provider and model pickers, plus **Ask**
+  (read-only) / **Plan** (propose a plan) / **Agent** (take actions) modes. Local CLI
   providers stream thinking and tool activity like their terminal apps do, and
   keep **per-session memory** across turns. A **Log in** button signs you into
   Claude Code / Codex from the panel (via each CLI's own browser flow) and shows
@@ -140,13 +140,47 @@ python -m spacy download en_core_web_sm
   **Log in** prompt appears. Each chat is one session; **New chat** starts a fresh
   one. Toggle **index** on to inject sema's semantic context (RAG) — useful for API
   providers, which can't read files themselves.
+- **Reasoning effort** — shown only for the two providers whose CLI actually takes one,
+  with each list carrying only levels verified to actually run. **Claude Code**
+  (`--effort`): low / medium / high / extra high / **max**. **Codex**
+  (`-c model_reasoning_effort=`): **none** / low / medium / high / extra high. The sets
+  genuinely differ — Codex errors on Claude's `max`, and Claude ignores Codex's `none` —
+  so the picker only ever offers what the selected CLI accepts, and `default` sends no
+  flag at all. Every other provider hides the picker: effort is a CLI feature, not an API
+  parameter.
+- **Attachments** — send images, PDFs, and text files to any provider. Use **📎**,
+  paste a screenshot straight into the composer, drag a file in, or right-click one
+  in the Explorer → **sema: Attach file to chat**. Each provider gets the file in its
+  native form: Anthropic and OpenAI as image/document content blocks, and the local
+  CLIs as real files on disk (`codex -i`, `opencode -f`, and Claude Code's own Read
+  tool). Text files are inlined into the prompt, so they work everywhere. If the model
+  you picked can't read the type you attached, sema says so up front instead of
+  quietly dropping it — and if you switch to a text-only model mid-chat, earlier
+  attachments degrade to a placeholder rather than erroring the conversation.
+
+  | Provider | Images | PDFs | Text |
+  |---|:--:|:--:|:--:|
+  | Claude Code | ✅ | ✅ | ✅ |
+  | Anthropic, OpenAI | ✅ | ✅ | ✅ |
+  | Codex | ✅ | — | ✅ |
+  | opencode, OpenRouter, Together | ✅¹ | ✅¹ | ✅ |
+  | DeepSeek | — | — | ✅ |
+
+  ¹ Per model, since these are gateways to many models. Pick a vision model (e.g.
+  Claude, Gemini, GPT) to send images; text-only models like DeepSeek or GLM accept
+  text files only. **opencode's "Default" is treated as text-only** — it resolves to
+  whatever that install is configured for (often a free, text-only model such as
+  `big-pickle`) and opencode doesn't report the resolved id, so choose an explicit
+  model from the dropdown to attach images.
 - **PII redaction** — an opt-in **redact** toggle scrubs sensitive data from
   everything sema sends to the model: regex for secrets and structured PII (emails,
   API keys, tokens, credit cards, SSNs, phone numbers) instantly and offline, plus
   an optional local spaCy NER pass for person and location names (`pip install
   'sema-mcp[pii]'` then `python -m spacy download en_core_web_sm`). Each turn shows
-  what was redacted. Covers the prompt and injected index context; the local CLI
-  agents can still read raw files themselves.
+  what was redacted. Covers the prompt, injected index context, and attached text
+  files; the local CLI agents can still read raw files themselves. Images and PDFs
+  can't be scrubbed, so with **redact** on, attaching one is refused rather than sent
+  unscrubbed under a "redacted" banner.
 - **Manage** — index status, chunk/file counts, model, last-updated time, index
   path, the sema binary in use, Claude Code / Codex registration, a file **watch**
   toggle, and the current chat session's **token usage and estimated cost**. Plus

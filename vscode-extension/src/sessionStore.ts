@@ -57,11 +57,19 @@ export function createSession(provider: string, model: string): StoredSession {
 
 /** Derive a one-line title from the first user message (used until a session is named). */
 export function titleFromMessages(messages: ChatMessage[]): string {
-  const first = messages.find((m) => m.role === 'user' && m.content.trim());
+  const first = messages.find(
+    (m) => m.role === 'user' && (m.content.trim() || m.attachments?.length),
+  );
   if (!first) {
     return 'New chat';
   }
   const line = first.content.trim().split('\n')[0].trim();
+  if (!line) {
+    // A turn that was only an attachment — name it after the file, else the history
+    // browser would show "New chat" for this session forever.
+    const att = first.attachments?.[0];
+    return att ? `📎 ${att.name}` : 'New chat';
+  }
   return line.length > 60 ? line.slice(0, 60).trimEnd() + '…' : line;
 }
 
@@ -88,6 +96,45 @@ export class SessionStore {
 
   private fileFor(id: string): string {
     return path.join(this.dir, `${id}.json`);
+  }
+
+  /**
+   * Where a session's attached files are staged. Lives inside the per-workspace
+   * partition so a stray directory can always be traced back to its repo — a flat
+   * global dir would leave orphans whose workspace is unknowable.
+   */
+  attachmentsDir(id: string): string {
+    return path.join(this.dir, 'attachments', id);
+  }
+
+  /**
+   * Drop attachment directories with no surviving session. Covers the cases the normal
+   * delete path can't: a "New chat" abandoned after staging a file, and the hard-error
+   * path in the chat panel that pops the turn. The 24h floor keeps it from racing a
+   * session that has staged files but hasn't been written to disk yet.
+   */
+  gcOrphans(): void {
+    const root = path.join(this.dir, 'attachments');
+    let ids: string[];
+    try {
+      ids = fs.readdirSync(root);
+    } catch {
+      return; // nothing staged yet
+    }
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const id of ids) {
+      try {
+        if (fs.existsSync(this.fileFor(id))) {
+          continue;
+        }
+        if (fs.statSync(path.join(root, id)).mtimeMs > cutoff) {
+          continue;
+        }
+        fs.rmSync(path.join(root, id), { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup — never let it break startup.
+      }
+    }
   }
 
   /** All sessions, newest activity first — reads and parses every session file. */
@@ -152,6 +199,11 @@ export class SessionStore {
       fs.unlinkSync(this.fileFor(id));
     } catch {
       // Already gone — nothing to do.
+    }
+    try {
+      fs.rmSync(this.attachmentsDir(id), { recursive: true, force: true });
+    } catch {
+      // Best-effort — gcOrphans will sweep it later.
     }
   }
 }

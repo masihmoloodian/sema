@@ -228,6 +228,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('sema.chat.setKey', () => chatProvider.promptForKey()),
     vscode.commands.registerCommand('sema.chat.clear', () => chatProvider.clearConversation()),
+    // Explorer context menu passes (clickedUri, selectedUris); the palette passes neither,
+    // in which case fall back to the native picker.
+    vscode.commands.registerCommand(
+      'sema.chat.attach',
+      (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+        const picked = uris?.length ? uris : uri ? [uri] : [];
+        return picked.length
+          ? chatProvider.attachFromExplorer(picked)
+          : chatProvider.attachViaDialog();
+      },
+    ),
     vscode.commands.registerCommand('sema.manage.refresh', () => refreshAll()),
 
     vscode.commands.registerCommand('sema.manage.reindex', () =>
