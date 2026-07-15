@@ -3,7 +3,7 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
-## [0.6.6]
+## [Unreleased]
 
 ### Added
 - **AvalAI provider** (`api.avalai.ir`) — an OpenAI-compatible gateway fronting Claude,
