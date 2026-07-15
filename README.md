@@ -18,7 +18,7 @@
 Sema builds a **single semantic index** of your codebase — every function, class, and method — and puts it to work two ways:
 
 - **🧠 Code intelligence for Claude Code & Codex.** An MCP server hands your CLI assistant semantic search (`search_code`), a reuse guard (`check_reuse`), and impact analysis over stdio — so it stops reading files blindly and stops rewriting helpers you already have.
-- **🖥️ A Cursor-style chat & agent in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs your repo. Use the **Claude Code**, **Codex**, and **opencode** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI** keys — switching **provider and model mid-conversation**, all backed by the same local index. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
+- **🖥️ A Cursor-style chat & agent in VS Code.** Not just an index — a full **chat _and_ agent** that reads, edits, and runs your repo. Use the **Claude Code**, **Codex**, and **opencode** you already run locally (no re-login), or your own **Anthropic / OpenAI / DeepSeek / OpenRouter / Together AI / AvalAI** keys — switching **provider and model mid-conversation**, all backed by the same local index. [Get it on the Marketplace →](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
 **No keys, no cloud, nothing leaves your machine.** The index runs fully offline — local SBERT embeddings, no API keys. The chat/agent talks to whichever model you point it at, with opt-in PII redaction before anything is sent.
 
@@ -55,9 +55,9 @@ Hands your CLI assistant semantic search, a reuse guard, and impact analysis ove
 
 ### 🖥️ The panel — a Cursor-style chat & agent
 
-Not just an index — a full chat and agent that reads, edits, and runs your repo. Eight providers, one conversation, backed by the same local index.
+Not just an index — a full chat and agent that reads, edits, and runs your repo. Nine providers, one conversation, backed by the same local index.
 
-- **💬 Eight engines, one conversation** — chat through **Claude Code**, **Codex**, and **opencode** running locally (reuse your login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key — switching **provider and model between turns**.
+- **💬 Nine engines, one conversation** — chat through **Claude Code**, **Codex**, and **opencode** running locally (reuse your login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, **Together AI**, and **AvalAI** APIs with your own key — switching **provider and model between turns**. **AvalAI** is reachable from networks where the vendor APIs are blocked, so chat keeps working through an outage.
 - **🤖 Ask · Plan · Agent** — **Ask** answers read-only, **Plan** investigates with read-only tools and proposes a step-by-step plan, **Agent** does the work: a real tool loop (`search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command`). **Even API models act — not just the local CLIs.**
 - **🔎 Powered by your index** — the agent searches your sema index directly; an index toggle can also inject retrieved code as RAG context.
 - **🛡️ Opt-in PII redaction** — redact secrets and personal data before anything is sent to a remote model.
@@ -135,10 +135,10 @@ See [Architecture](https://github.com/masihmoloodian/sema/blob/main/docs/archite
 [![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/MasihMoloodian.sema-codebase-chat?label=VS%20Code%20Marketplace&color=1e88e5&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/MasihMoloodian.sema-codebase-chat?color=1e88e5)](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)
 
-Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. One conversation, eight engines, one index — switch provider mid-conversation.
+Prefer a UI? The **[sema VS Code extension](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)** is a **Cursor-style chat + agent** for your codebase, backed by the same local index. One conversation, nine engines, one index — switch provider mid-conversation.
 
-- **💬 Eight providers, one conversation** — **Claude Code**, **Codex**, and **opencode** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, and **Together AI** APIs with your own key; switch provider and model between turns.
-- **🤖 Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with read-only tools and propose a step-by-step plan, **Agent** to carry it out. In Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so **even API models (OpenRouter, OpenAI, DeepSeek, Together AI) read, edit files, and run commands**, not just the local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
+- **💬 Nine providers, one conversation** — **Claude Code**, **Codex**, and **opencode** running locally (reuse your existing login, no API key), or the **Anthropic**, **OpenAI**, **DeepSeek**, **OpenRouter**, **Together AI**, and **AvalAI** APIs with your own key; switch provider and model between turns. **AvalAI** (`api.avalai.ir`) fronts Claude, GPT, Gemini, Grok, and open models from a network reachable when the vendor APIs are blocked — an escape hatch during an internet outage.
+- **🤖 Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with read-only tools and propose a step-by-step plan, **Agent** to carry it out. In Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`, `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`, `run_command` — so **even API models (OpenRouter, OpenAI, DeepSeek, Together AI, AvalAI) read, edit files, and run commands**, not just the local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
 - **🔎 Index-aware** — the agent searches your sema index directly; an index toggle also injects retrieved code as RAG on demand.
 - **🛡️ Opt-in PII redaction** — strip secrets and personal data before anything is sent to a remote model.
 - **🧠 Reasoning-effort selector, streamed thinking + tool activity, per-session memory**, and the live **selected model id** — the model the API actually served, not what it claims to be.

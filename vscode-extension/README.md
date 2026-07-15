@@ -2,19 +2,28 @@
 
 A UI for [sema](https://github.com/masihmoloodian/sema) — semantic code search,
 reuse checks, and a **codebase-aware chat panel**, right inside the editor. Chat
-with your code through eight providers:
+with your code through nine providers:
 
 - **Claude Code (local)**, **Codex (local)**, and **opencode (local)** — reuse the
   CLIs you already have installed and logged in; no API key needed. They read (and, in
   Agent mode, edit) your repository directly.
-- **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, **OpenRouter**, and
-  **Together AI** — bring your own API key; sema retrieves the most relevant code and injects it as context
+- **Claude (Anthropic API)**, **OpenAI**, **DeepSeek**, **OpenRouter**,
+  **Together AI**, and **AvalAI** — bring your own API key; sema retrieves the most relevant code and injects it as context
   (RAG). In **Agent** mode, the OpenAI-compatible providers (OpenAI, DeepSeek,
-  OpenRouter, Together AI) also get file/command tools and carry out changes directly — creating
+  OpenRouter, Together AI, AvalAI) also get file/command tools and carry out changes directly — creating
   and editing files, running commands — not just describing them (function-calling
   models only). OpenRouter is a single gateway to models from many providers
   (Anthropic, OpenAI, Google, Meta, …) and reports the exact per-call cost; the
-  others estimate cost from public list prices.
+  others estimate cost from public list prices — except **AvalAI**, which reports no
+  cost at all (see below).
+
+**AvalAI** is a gateway (`api.avalai.ir`) reachable from networks where the upstream
+vendor APIs are not — it exists here to keep sema working through an internet outage
+or regional block. Selecting it routes **every** request to `api.avalai.ir`; the model
+id only names what AvalAI proxies to on its side, so picking `claude-opus-4-8` under
+AvalAI never touches `api.anthropic.com`. Note this covers the API-key providers only:
+the local CLIs (Claude Code, Codex, opencode) spawn their own binaries and talk to
+their own vendor endpoints, so they stay unreachable during an outage.
 
 The extension shells out to the `sema` CLI (`--json` mode) for search and
 retrieval, and runs every provider from the extension host — so API keys never
@@ -80,9 +89,11 @@ You need **one** provider, and you can switch any time (even mid-conversation).
 Pick whichever path fits — **path A needs no extra install**:
 
 **A · Bring an API key** — the simplest path, nothing else to install.
-Choose **OpenRouter**, **OpenAI**, **DeepSeek**, **Together AI**, or **Claude (Anthropic API)** in
+Choose **OpenRouter**, **OpenAI**, **DeepSeek**, **Together AI**, **AvalAI**, or **Claude (Anthropic API)** in
 the panel → **Set key** → paste your key (stored in VS Code SecretStorage, never in
-settings). OpenRouter is a single gateway to models from many providers.
+settings). OpenRouter is a single gateway to models from many providers; **AvalAI**
+([key from chat.avalai.ir](https://chat.avalai.ir/platform/home)) is another, reachable
+from networks where the vendor APIs are blocked.
 
 **B · Reuse a local CLI** — no key management in sema. Claude Code / Codex use your
 existing Claude/ChatGPT subscription; **opencode** is open-source and works with any
@@ -163,7 +174,7 @@ python -m spacy download en_core_web_sm
   | Claude Code | ✅ | ✅ | ✅ |
   | Anthropic, OpenAI | ✅ | ✅ | ✅ |
   | Codex | ✅ | — | ✅ |
-  | opencode, OpenRouter, Together | ✅¹ | ✅¹ | ✅ |
+  | opencode, OpenRouter, Together, AvalAI | ✅¹ | ✅¹ | ✅ |
   | DeepSeek | — | — | ✅ |
 
   ¹ Per model, since these are gateways to many models. Pick a vision model (e.g.
@@ -229,7 +240,7 @@ VS Code panels  ──CLI --json──►  sema (search / get / reuse / status) 
    │                                                                     (ChromaDB + SBERT)
    ├─ chat (local)  ──►  Claude Code / Codex CLI  ──stream──►  panel   (reads/edits repo)
    └─ chat (API)  ──context──►  Anthropic SDK · OpenAI SDK       ──stream──►  panel
-                                (OpenAI · DeepSeek · OpenRouter · Together AI share the OpenAI SDK)
+                                (OpenAI · DeepSeek · OpenRouter · Together AI · AvalAI share the OpenAI SDK)
 ```
 
 Providers run in the Node extension host, so API keys never reach webview/page context.

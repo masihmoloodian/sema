@@ -3,6 +3,29 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.6.6]
+
+### Added
+- **AvalAI provider** (`api.avalai.ir`) — an OpenAI-compatible gateway fronting Claude,
+  GPT, Gemini, Grok, and open models under bare model ids. It is reachable from networks
+  where the upstream vendor APIs are not, so chat keeps working through an internet
+  outage or regional block. Selecting it routes every request to `api.avalai.ir`: the
+  model id only names what AvalAI proxies to on its side, so `claude-opus-4-8` under
+  AvalAI never touches `api.anthropic.com`. Set a key in the panel → **Set key**
+  (from [chat.avalai.ir](https://chat.avalai.ir/platform/home)); works in Ask, Plan, and
+  Agent mode, and supports image/PDF attachments per model.
+- 16 curated models across Anthropic / OpenAI / Google / xAI / open models, verified
+  against the live catalogue; **+ custom id…** reaches the rest of the ~400 AvalAI
+  offers.
+
+### Notes
+- AvalAI turns report **no cost**. Its inline `estimated_cost` is approximate by its own
+  docs, and exact figures need a second authenticated lookup keyed by `x-request-id` —
+  so sema reports nothing rather than a number the provider won't stand behind.
+- The outage escape hatch covers the **API-key providers only**. The local CLIs (Claude
+  Code, Codex, opencode) spawn their own binaries against their own vendor endpoints and
+  are unaffected by the provider's base URL.
+
 ## [0.6.5]
 
 ### Added

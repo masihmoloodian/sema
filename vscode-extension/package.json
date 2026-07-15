@@ -1,8 +1,8 @@
 {
   "name": "sema-codebase-chat",
   "displayName": "sema — semantic code search & chat",
-  "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude, OpenAI, DeepSeek, OpenRouter), powered by the local sema index.",
-  "version": "0.6.5",
+  "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude, OpenAI, DeepSeek, OpenRouter, Together AI, AvalAI), powered by the local sema index.",
+  "version": "0.6.6",
   "publisher": "MasihMoloodian",
   "license": "MIT",
   "icon": "media/icon-128.png",

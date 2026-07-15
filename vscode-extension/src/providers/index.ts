@@ -4,6 +4,7 @@ import { openaiProvider } from './openai';
 import { deepseekProvider } from './deepseek';
 import { openrouterProvider } from './openrouter';
 import { togetherProvider } from './together';
+import { avalaiProvider } from './avalai';
 import { ChatProvider } from './types';
 
 export * from './types';
@@ -19,6 +20,7 @@ export const PROVIDERS: ChatProvider[] = [
   deepseekProvider,
   openrouterProvider,
   togetherProvider,
+  avalaiProvider,
 ];
 
 export function getProvider(id: string | undefined): ChatProvider {
