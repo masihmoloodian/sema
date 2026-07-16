@@ -2,7 +2,7 @@
   "name": "sema-codebase-chat",
   "displayName": "sema — semantic code search & chat",
   "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude, OpenAI, DeepSeek, OpenRouter), powered by the local sema index.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "MasihMoloodian",
   "license": "MIT",
   "icon": "media/icon-128.png",
@@ -168,11 +168,12 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle",
+    "vscode:prepublish": "npm run bundle && node scripts/check-bundle.cjs && node scripts/check-webview.cjs",
     "bundle": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "compile": "tsc -p ./",
-    "test": "esbuild src/*.test.ts src/providers/*.test.ts --bundle --platform=node --format=cjs --outdir=out/test --external:vscode && node --test out/test/*.test.js out/test/providers/*.test.js",
+    "test": "esbuild src/*.test.ts src/providers/*.test.ts --bundle --platform=node --format=cjs --outdir=out/test --external:vscode && node --test out/test/*.test.js out/test/providers/*.test.js && npm run test:bundle",
+    "test:bundle": "npm run bundle && node scripts/check-bundle.cjs && node scripts/check-webview.cjs",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -183,6 +184,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.211",
     "@anthropic-ai/sdk": "^0.111.0",
     "openai": "^6.46.0"
   }

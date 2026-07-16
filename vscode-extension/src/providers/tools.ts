@@ -150,6 +150,18 @@ export const READONLY_TOOLS: ToolDef[] = [
   'read_file',
 ].map((n) => DEFS[n]);
 
+const SEMA_TOOLS = new Set(['search_code', 'get_code', 'check_reuse']);
+
+/** Select the mode's tools without advertising Sema when its index toggle is off. */
+export function toolsForMode(readOnly: boolean, semaEnabled: boolean): ToolDef[] {
+  const tools = readOnly ? READONLY_TOOLS : AGENT_TOOLS;
+  return semaEnabled
+    ? tools
+    : tools.filter((tool) =>
+        tool.type !== 'function' || !SEMA_TOOLS.has(tool.function.name),
+      );
+}
+
 /**
  * The same toolset in Anthropic's Messages-API tool shape ({@link Anthropic.Tool}),
  * derived from the OpenAI definitions above so both dialects stay in lockstep — one

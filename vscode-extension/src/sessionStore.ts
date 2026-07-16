@@ -19,6 +19,8 @@ export interface StoredSession {
   /** Model and mode are part of a CLI thread's execution contract. */
   cliSessionModel?: string;
   cliSessionMode?: string;
+  /** Permission contract used to create the native Agent thread. */
+  cliSessionPermission?: string;
   /** Latest Plan-mode Markdown, relative to the workspace. */
   planPath?: string;
   usage: SessionUsage;

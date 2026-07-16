@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions } from './types';
-import { AGENT_TOOLS, READONLY_TOOLS, toAnthropicTools, executeTool, toolDetail, ToolContext } from './tools';
+import { toAnthropicTools, executeTool, toolDetail, ToolContext, toolsForMode } from './tools';
 import { readBase64 } from '../attachments';
 
 /** Public list prices (USD per 1M tokens) for cost estimation; unknown models get no estimate. */
@@ -163,7 +163,7 @@ export class AnthropicProvider implements ChatProvider {
    */
   private async runAgent(client: Anthropic, opts: StreamOptions): Promise<void> {
     const readOnly = !opts.agent;
-    const tools = toAnthropicTools(readOnly ? READONLY_TOOLS : AGENT_TOOLS);
+    const tools = toAnthropicTools(toolsForMode(readOnly, !!opts.semaBin));
     const ctx: ToolContext = { cwd: opts.cwd || process.cwd(), readOnly, semaBin: opts.semaBin };
     const messages: Anthropic.MessageParam[] = await toMessages(opts.messages, opts.attachmentsDir);
     const totals = newTotals();

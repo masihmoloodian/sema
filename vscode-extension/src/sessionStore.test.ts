@@ -19,6 +19,7 @@ test('session survives restart with transcript, plan, and CLI execution contract
   session.cliSessionProvider = 'codex';
   session.cliSessionModel = 'gpt-5.5';
   session.cliSessionMode = 'plan';
+  session.cliSessionPermission = 'ask';
   firstProcess.save(session);
 
   const afterRestart = new SessionStore(base, '/workspace/project').load(session.id);

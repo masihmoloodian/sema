@@ -7,14 +7,16 @@ const state = {
   cliSessionProvider: 'codex',
   cliSessionModel: 'gpt-5.5',
   cliSessionMode: 'agent',
+  cliSessionPermission: 'ask',
 };
 
-test('CLI resume requires the same provider, model, and mode', () => {
-  assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.5', 'agent'), 'native-1');
-  assert.equal(compatibleCliSession(state, 'claude-code', 'gpt-5.5', 'agent'), undefined);
-  assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.4', 'agent'), undefined);
+test('CLI resume requires the same provider, model, mode, and permission contract', () => {
+  assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.5', 'agent', 'ask'), 'native-1');
+  assert.equal(compatibleCliSession(state, 'claude-code', 'gpt-5.5', 'agent', 'ask'), undefined);
+  assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.4', 'agent', 'ask'), undefined);
   assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.5', 'plan'), undefined);
   assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.5', 'ask'), undefined);
+  assert.equal(compatibleCliSession(state, 'codex', 'gpt-5.5', 'agent', 'bypass'), undefined);
 });
 
 test('legacy sessions without model/mode restart safely with full transcript', () => {
@@ -24,21 +26,24 @@ test('legacy sessions without model/mode restart safely with full transcript', (
       'codex',
       'gpt-5.5',
       'agent',
+      'ask',
     ),
     undefined,
   );
 });
 
-test('unknown mode values fall back to Ask', () => {
+test('fresh workspaces default to Agent while unknown mode values fall back to Ask', () => {
   assert.equal(normalizeChatMode('agent'), 'agent');
   assert.equal(normalizeChatMode('plan'), 'plan');
   assert.equal(normalizeChatMode('something-else'), 'ask');
-  assert.equal(normalizeChatMode(undefined), 'ask');
+  assert.equal(normalizeChatMode(undefined), 'agent');
 });
 
-test('Plan and Agent always prefetch sema; Ask is opt-in', () => {
-  assert.equal(shouldPrefetchIndex(false, 'agent'), true);
-  assert.equal(shouldPrefetchIndex(false, 'plan'), true);
+test('index toggle controls sema prefetch in every mode', () => {
+  assert.equal(shouldPrefetchIndex(false, 'agent'), false);
+  assert.equal(shouldPrefetchIndex(false, 'plan'), false);
   assert.equal(shouldPrefetchIndex(false, 'ask'), false);
+  assert.equal(shouldPrefetchIndex(true, 'agent'), true);
+  assert.equal(shouldPrefetchIndex(true, 'plan'), true);
   assert.equal(shouldPrefetchIndex(true, 'ask'), true);
 });

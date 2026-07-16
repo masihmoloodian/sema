@@ -183,7 +183,9 @@ test('OpenRouter-style bare models use sema mode logic end to end', async (t) =>
 
   const planOutput: string[] = [];
   const planActivity: string[] = [];
-  await provider.stream(options(root, 'plan', planOutput, planActivity));
+  const planOpts = options(root, 'plan', planOutput, planActivity);
+  planOpts.semaBin = 'sema';
+  await provider.stream(planOpts);
   const planTools = mock.requests[1].tools?.map((tool) => tool.function.name) ?? [];
   assert.ok(planTools.includes('search_code'));
   assert.ok(planTools.includes('check_reuse'));
@@ -195,7 +197,9 @@ test('OpenRouter-style bare models use sema mode logic end to end', async (t) =>
 
   const agentOutput: string[] = [];
   const agentActivity: string[] = [];
-  await provider.stream(options(root, 'agent', agentOutput, agentActivity));
+  const agentOpts = options(root, 'agent', agentOutput, agentActivity);
+  agentOpts.semaBin = 'sema';
+  await provider.stream(agentOpts);
   const agentTools = mock.requests[3].tools?.map((tool) => tool.function.name) ?? [];
   assert.ok(agentTools.includes('search_code'));
   assert.ok(agentTools.includes('check_reuse'));

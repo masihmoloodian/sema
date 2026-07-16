@@ -13,6 +13,15 @@ test('every Agent and Plan provider prompt gets the sema workflow', () => {
   }
 });
 
+test('index-off Agent and Plan prompts do not advertise sema', () => {
+  for (const readsWorkspace of [true, false]) {
+    for (const mode of ['plan', 'agent']) {
+      const prompt = buildSystem('', readsWorkspace, mode, '', '', false);
+      assert.doesNotMatch(prompt, /search_code|get_code|check_reuse|semantic index/);
+    }
+  }
+});
+
 test('Ask mode is simple chat for CLI and API providers', () => {
   for (const readsWorkspace of [true, false]) {
     const prompt = buildSystem('', readsWorkspace, 'ask');

@@ -1,13 +1,16 @@
 export type ChatMode = 'ask' | 'plan' | 'agent';
 
-/** Treat unknown persisted/UI values as Ask, the least-capable mode. */
+/** Fresh workspaces start in Agent; corrupt persisted/UI values still fail safe to Ask. */
 export function normalizeChatMode(value: string | undefined): ChatMode {
-  return value === 'plan' || value === 'agent' ? value : 'ask';
+  if (value === undefined) {
+    return 'agent';
+  }
+  return value === 'ask' || value === 'plan' || value === 'agent' ? value : 'ask';
 }
 
-/** Agentic modes always begin with sema context; Ask only does so when opted in. */
-export function shouldPrefetchIndex(useIndex: boolean, mode: ChatMode): boolean {
-  return mode !== 'ask' || useIndex;
+/** The visible index toggle is authoritative in every chat mode. */
+export function shouldPrefetchIndex(useIndex: boolean, _mode: ChatMode): boolean {
+  return useIndex;
 }
 
 export interface CliResumeState {
@@ -15,6 +18,7 @@ export interface CliResumeState {
   cliSessionProvider?: string;
   cliSessionModel?: string;
   cliSessionMode?: string;
+  cliSessionPermission?: string;
 }
 
 /**
@@ -30,10 +34,12 @@ export function compatibleCliSession(
   provider: string,
   model: string,
   mode: ChatMode,
+  permission?: string,
 ): string | undefined {
   return state.cliSessionProvider === provider &&
     state.cliSessionModel === model &&
-    state.cliSessionMode === mode
+    state.cliSessionMode === mode &&
+    state.cliSessionPermission === permission
     ? state.cliSessionId
     : undefined;
 }

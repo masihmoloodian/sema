@@ -58,6 +58,19 @@ export interface TokenUsage {
   costUsd?: number;
 }
 
+/** Agent-mode permission policy exposed by the local Claude Code and Codex providers. */
+export type AgentPermissionMode = 'ask' | 'bypass';
+
+/** One provider tool action that is waiting for the user to allow or reject it. */
+export interface PermissionRequest {
+  provider: 'claude-code' | 'codex';
+  title: string;
+  detail?: string;
+  tool?: string;
+}
+
+export type PermissionDecision = 'allow' | 'deny';
+
 export interface StreamOptions {
   model: string;
   system: string;
@@ -83,6 +96,10 @@ export interface StreamOptions {
   semaBin?: string;
   /** Reasoning effort level ('default' = the CLI's own default). */
   effort?: string;
+  /** Agent-mode permission behavior for providers that support interactive consent. */
+  permissionMode?: AgentPermissionMode;
+  /** Pause a provider tool call until the extension user allows or denies it. */
+  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionDecision>;
   /** Resume an existing CLI session (memory across turns); omit to start fresh. */
   sessionId?: string;
   /** Reports the CLI session id once known, so the next turn can resume it. */
@@ -114,6 +131,8 @@ export interface ChatProvider {
    * accepted values differ, so this list must mirror the CLI's own argument.
    */
   readonly efforts?: readonly string[];
+  /** Agent-mode permission choices supported by this provider. */
+  readonly permissionModes?: readonly AgentPermissionMode[];
   /** True for API-key providers; false for local-CLI providers that reuse an existing login. */
   readonly requiresKey: boolean;
   /** True if the provider reads the repo itself (agentic CLI); false if it needs injected RAG context. */

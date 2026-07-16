@@ -4,7 +4,13 @@ import { promisify } from 'util';
 import * as path from 'path';
 import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
-import { Attachment, ChatProvider, TokenUsage } from './providers/types';
+import {
+  AgentPermissionMode,
+  Attachment,
+  ChatProvider,
+  PermissionRequest,
+  TokenUsage,
+} from './providers/types';
 import { redactPieces, redactionSummary } from './redact';
 import { SessionStore, StoredSession, createSession, freshUsage, titleFromMessages } from './sessionStore';
 import { formatSize, materialize, stage, totalBytes, unstage, LIMITS } from './attachments';
@@ -21,6 +27,7 @@ const MODE_KEY = 'sema.chat.mode';
 const INDEX_KEY = 'sema.chat.useIndex';
 const REDACT_KEY = 'sema.chat.redact';
 const EFFORT_KEY = 'sema.chat.effort';
+const PERMISSION_KEY = 'sema.chat.permissions';
 const CUSTOM_MODELS_KEY = 'sema.chat.customModels';
 const RESOLVED_DEFAULT_KEY = 'sema.chat.resolvedDefault';
 // Per-workspace pointer to the session to reopen on the next launch (survives restart).
@@ -49,6 +56,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private controller?: AbortController;
   private loginTerm?: vscode.Terminal;
   private redactHintShown = false;
+  /** Keep parallel tool requests from opening overlapping inline permission cards. */
+  private permissionQueue: Promise<void> = Promise.resolve();
+  private permissionEpoch = 0;
+  private nextPermissionId = 0;
+  private readonly pendingPermissions = new Map<
+    string,
+    (decision: 'allow' | 'deny') => void
+  >();
   /** Durable, per-workspace session storage (undefined only if storage is unavailable). */
   private store?: SessionStore;
   /** The conversation currently on screen — its `messages` array is the live transcript. */
@@ -147,6 +162,71 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return stored && effortsForModel(provider, this.modelId).includes(stored) ? stored : 'default';
   }
 
+  /** Permission choice is stored per provider so Claude and Codex never overwrite each other. */
+  private get permissionMode(): AgentPermissionMode {
+    const provider = getProvider(this.providerId);
+    const stored =
+      this.context.globalState.get<Record<string, AgentPermissionMode>>(PERMISSION_KEY)?.[provider.id];
+    return stored && provider.permissionModes?.includes(stored) ? stored : 'ask';
+  }
+
+  /** Inline chat consent prompt shared by Claude Agent SDK and Codex app-server. */
+  private async requestPermission(request: PermissionRequest): Promise<'allow' | 'deny'> {
+    const epoch = this.permissionEpoch;
+    let resolveDecision!: (decision: 'allow' | 'deny') => void;
+    const decision = new Promise<'allow' | 'deny'>((resolve) => { resolveDecision = resolve; });
+    this.permissionQueue = this.permissionQueue
+      .then(async () => {
+        // A stopped turn may already have queued several parallel tool requests.
+        // Do not surface those stale requests after the current one is rejected.
+        if (epoch !== this.permissionEpoch) {
+          resolveDecision('deny');
+          return;
+        }
+
+        const id = `permission-${++this.nextPermissionId}`;
+        const response = new Promise<'allow' | 'deny'>((resolve) => {
+          this.pendingPermissions.set(id, resolve);
+        });
+        try {
+          const posted = await (this.view?.webview.postMessage({
+            type: 'permissionRequest',
+            id,
+            request,
+          }) ?? Promise.resolve(false));
+          if (!posted) {
+            this.resolvePermission(id, 'deny');
+          }
+          resolveDecision(await response);
+        } catch {
+          this.resolvePermission(id, 'deny');
+          resolveDecision('deny');
+        }
+      })
+      .catch(() => resolveDecision('deny'));
+    return decision;
+  }
+
+  /** Resolve one visible permission card; unknown or repeated responses are ignored. */
+  private resolvePermission(id: string, decision: 'allow' | 'deny'): boolean {
+    const resolve = this.pendingPermissions.get(id);
+    if (!resolve) {
+      return false;
+    }
+    this.pendingPermissions.delete(id);
+    resolve(decision);
+    void this.view?.webview.postMessage({ type: 'permissionResolved', id, decision });
+    return true;
+  }
+
+  /** Reject the visible card and invalidate requests queued by the stopped turn. */
+  private cancelPermissions(): void {
+    this.permissionEpoch += 1;
+    for (const id of [...this.pendingPermissions.keys()]) {
+      this.resolvePermission(id, 'deny');
+    }
+  }
+
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
     view.webview.options = { enableScripts: true };
@@ -158,6 +238,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.notifyError(`sema: ${(e as Error).message}`);
         view.webview.postMessage({ type: 'assistantEnd' });
       });
+    });
+    view.onDidDispose(() => {
+      if (this.view === view) {
+        this.view = undefined;
+        this.cancelPermissions();
+      }
     });
     // Re-check sign-in state when the panel regains focus (e.g. after logging in
     // via the terminal) or when the login terminal is closed.
@@ -178,6 +264,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   clearConversation(): void {
     this.persist();
     this.controller?.abort();
+    this.cancelPermissions();
     this.session = createSession(this.providerId, this.modelId);
     // Composer chips were staged under the old session's directory, so they can't
     // carry over; gcOrphans sweeps their bytes.
@@ -237,6 +324,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.controller?.abort();
+    this.cancelPermissions();
     this.session = loaded;
     this.clearPending();
     this.applyUsage(loaded.usage);
@@ -250,6 +338,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.store?.delete(id);
     if (id === this.session.id) {
       this.controller?.abort();
+      this.cancelPermissions();
       this.session = createSession(this.providerId, this.modelId);
       this.clearPending();
       this.applyUsage(freshUsage());
@@ -586,6 +675,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.sendPending();
         void this.refreshAuthState();
         break;
+      case 'manage':
+        await vscode.commands.executeCommand('sema.manage.open');
+        break;
+      case 'updateAgents':
+        await vscode.commands.executeCommand('sema.manage.updateAgents');
+        break;
       case 'attach':
         await this.attachViaDialog();
         break;
@@ -611,7 +706,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'stop':
         this.controller?.abort();
+        this.cancelPermissions();
         break;
+      case 'permissionDecision': {
+        const decision = msg.decision === 'allow' ? 'allow' : 'deny';
+        this.resolvePermission(String(msg.id ?? ''), decision);
+        break;
+      }
       case 'newSession':
         this.clearConversation();
         break;
@@ -656,6 +757,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'setEffort':
         await this.context.globalState.update(EFFORT_KEY, String(msg.effort));
         break;
+      case 'setPermission': {
+        const provider = getProvider(this.providerId);
+        const requested = String(msg.permission) as AgentPermissionMode;
+        if (provider.permissionModes?.includes(requested)) {
+          const all =
+            this.context.globalState.get<Record<string, AgentPermissionMode>>(PERMISSION_KEY) ?? {};
+          all[provider.id] = requested;
+          await this.context.globalState.update(PERMISSION_KEY, all);
+        }
+        await this.sendConfig();
+        break;
+      }
       case 'customModel': {
         const cmProvider = getProvider(this.providerId);
         const example =
@@ -723,11 +836,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         ],
         // Empty for providers with no effort control — the picker stays hidden.
         efforts: p.efforts ?? [],
+        permissionModes: p.permissionModes ?? [],
       })),
       provider: provider.id,
       model: this.modelId,
       mode: this.mode,
       effort: this.effort,
+      permission: this.permissionMode,
       defaults: this.context.globalState.get<Record<string, string>>(RESOLVED_DEFAULT_KEY) ?? {},
       useIndex: this.useIndex,
       redact: this.redact,
@@ -787,9 +902,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // CLI providers read the repo themselves — send the prompt directly, like Cursor.
     let context = '';
     if (shouldPrefetchIndex(this.useIndex, this.mode) && text.trim()) {
-      // Plan/Agent always start from focused sema context, regardless of whether a
-      // provider model obeys the skill. Ask stays plain chat unless the user opts in.
-      // Re-check hashes every time so persisted state cannot serve stale context.
+      // The visible toggle is authoritative in every mode. Re-check hashes every
+      // enabled turn so persisted state cannot serve stale context.
       const indexReady = await this.ensureIndexReady();
       if (indexReady) {
         view.webview.postMessage({ type: 'status', text: 'searching sema index…' });
@@ -888,6 +1002,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const maxTokens = cfg.get<number>('chat.maxTokens', 8192);
     const agent = this.mode === 'agent';
     const plan = this.mode === 'plan';
+    const permissionMode = agent && provider.permissionModes ? this.permissionMode : undefined;
     let cliBin: string | undefined;
     if (provider.id === 'claude-code') {
       cliBin = cfg.get<string>('chat.claudePath');
@@ -904,6 +1019,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       provider.id,
       this.modelId,
       this.mode,
+      permissionMode,
     );
     let assistant = '';
     try {
@@ -913,9 +1029,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         cliBin,
         agent,
         plan,
-        semaBin: cfg.get<string>('binaryPath') || 'sema',
+        semaBin: this.useIndex ? cfg.get<string>('binaryPath') || 'sema' : undefined,
         // Only providers that declare an effort argument get one.
         effort: provider.efforts ? this.effort : undefined,
+        permissionMode,
         model: this.modelId,
         system: buildSystem(
           outContext,
@@ -923,6 +1040,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.mode,
           activePlan,
           this.session.planPath,
+          this.useIndex,
         ),
         messages: outMessages,
         attachmentsDir: this.attachmentsDir,
@@ -934,6 +1052,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.session.cliSessionProvider = provider.id;
           this.session.cliSessionModel = this.modelId;
           this.session.cliSessionMode = this.mode;
+          this.session.cliSessionPermission = permissionMode;
         },
         onModel: (m) => {
           view.webview.postMessage({ type: 'model', model: m });
@@ -947,6 +1066,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
         onThinking: (t) => view.webview.postMessage({ type: 'thinking', text: t }),
         onActivity: (tool, detail) => view.webview.postMessage({ type: 'activity', tool, detail }),
+        onPermissionRequest: (request) => this.requestPermission(request),
         onUsage: (u) => this.recordUsage(u),
       });
       this.history.push({ role: 'assistant', content: assistant });
@@ -982,6 +1102,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.session.cliSessionProvider = undefined;
         this.session.cliSessionModel = undefined;
         this.session.cliSessionMode = undefined;
+        this.session.cliSessionPermission = undefined;
         // The turn is gone, so put its text and files back in the composer — otherwise
         // the chips are already cleared and the attachments are unrecoverable.
         this.pending = attachments;
@@ -1135,6 +1256,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   details.think summary { cursor: pointer; user-select: none; }
   .think-body { white-space: pre-wrap; font-style: italic; opacity: .85; padding: 4px 0 4px 10px; }
   .notice { text-align: center; font-size: 11px; color: var(--vscode-descriptionForeground); padding: 4px 0; }
+  .permission-card { margin: 7px 0; padding: 10px; border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-panel-border)); border-radius: 9px; background: var(--vscode-textBlockQuote-background); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
+  .permission-head { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+  .permission-icon { color: var(--vscode-editorWarning-foreground, #d7a500); font-size: 15px; line-height: 1; }
+  .permission-detail { margin-top: 7px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .permission-actions { display: flex; align-items: center; gap: 7px; margin-top: 10px; }
+  .permission-actions button { border: 1px solid var(--vscode-button-border, transparent); border-radius: 5px; padding: 4px 12px; font-family: inherit; font-size: 11.5px; cursor: pointer; }
+  .permission-actions button:disabled { cursor: default; opacity: .65; }
+  .permission-allow { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .permission-allow:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+  .permission-reject { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+  .permission-reject:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
+  .permission-state { margin-left: auto; color: var(--vscode-descriptionForeground); font-size: 11px; }
+  .permission-card.allowed { border-color: var(--vscode-testing-iconPassed, var(--vscode-editorInfo-foreground)); }
+  .permission-card.denied { border-color: var(--vscode-testing-iconFailed, var(--vscode-editorError-foreground)); }
   #status { padding: 2px 12px; min-height: 14px; font-size: 11px; color: var(--vscode-descriptionForeground); }
 
   #composer { margin: 0 10px 10px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -1166,6 +1301,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .pill.open { border-color: var(--vscode-focusBorder); }
   .pill .cap { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pill .caret { flex: none; opacity: .6; }
+  .access-indicator { display: none; align-items: center; gap: 5px; padding: 4px 5px; border: none; border-radius: 5px; background: transparent; color: var(--vscode-editorWarning-foreground, #e85d3f); font-family: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+  .access-indicator:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+  .access-indicator svg { width: 13px; height: 13px; flex: none; }
   #modelpill { min-width: 0; }
   #send { width: 30px; height: 30px; min-width: 30px; padding: 0; border: none; border-radius: 8px; background: var(--vscode-foreground); color: var(--vscode-editor-background); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
   #send:hover { opacity: .82; }
@@ -1237,9 +1375,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <div id="toolbar">
       <div id="controls">
         <button id="plusbtn" class="roundbtn" title="Attach a file · context options"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+        <button id="permissionpill" class="access-indicator" title="Full access is enabled — click to change permissions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3z"></path><path d="M12 8v5"></path><circle cx="12" cy="16.5" r=".6" fill="currentColor" stroke="none"></circle></svg><span>Full access</span></button>
         <button id="modepill" class="pill" title="Ask = read-only Q&amp;A · Plan = propose a plan (no edits) · Agent = make changes"><span class="cap">Ask</span><svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
         <span class="spacer"></span>
-        <button id="gearbtn" class="roundbtn" title="Provider, effort &amp; sign-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span class="dot"></span></button>
+        <button id="gearbtn" class="roundbtn" title="Provider, permissions, effort &amp; sign-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span class="dot"></span></button>
         <button id="modelpill" class="pill" title="Model"><span class="cap">default</span><svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
       </div>
       <button id="send" title="Send"></button>
@@ -1255,12 +1394,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var plusBtn = document.getElementById('plusbtn');
     var gearBtn = document.getElementById('gearbtn');
     var modePill = document.getElementById('modepill');
+    var permissionPill = document.getElementById('permissionpill');
     var modelPill = document.getElementById('modelpill');
     var modelInfo = document.getElementById('modelinfo');
     // Single source of truth for every composer control — the pills and popover
     // menus are rebuilt from this on each 'config' / 'auth' message.
     var state = {
-      providers: [], provider: '', model: 'default', mode: 'ask', effort: 'default',
+      providers: [], provider: '', model: 'default', mode: 'agent', effort: 'default', permission: 'ask',
       defaults: {}, useIndex: false, redact: false,
       requiresKey: false, hasKey: false, canLogin: false, loggedIn: false,
     };
@@ -1287,10 +1427,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       modePill.querySelector('.cap').textContent = modeLabel();
       var cap = modelPill.querySelector('.cap'); cap.textContent = modelLabel(); modelPill.title = 'Model: ' + modelIdOf(state.model);
       var needs = (state.requiresKey && !state.hasKey) || (state.canLogin && !state.loggedIn);
+      var activeProvider = providerOf(state.provider);
+      var hasPermissionControl = activeProvider && activeProvider.permissionModes && activeProvider.permissionModes.length;
+      permissionPill.style.display = state.mode === 'agent' && state.permission === 'bypass' && hasPermissionControl ? 'inline-flex' : 'none';
       gearBtn.classList.toggle('needs', needs);
       gearBtn.title = needs
         ? (state.requiresKey && !state.hasKey ? 'Set an API key to send' : 'Sign in to send')
-        : 'Provider, effort & sign-in';
+        : 'Provider, permissions, effort & sign-in';
       showSelectedModel(state.model);
     }
     var composerEl = document.getElementById('composer');
@@ -1461,6 +1604,45 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       b.textContent = content;
       if (attachments && attachments.length){ b.appendChild(attachRow(attachments)); }
     }
+    var permissionCards = {};
+    function resolvePermissionCard(id, decision){
+      var card = permissionCards[id];
+      if (!card) return;
+      var buttons = card.querySelectorAll('button');
+      for (var i=0;i<buttons.length;i++) buttons[i].disabled = true;
+      card.classList.add(decision === 'allow' ? 'allowed' : 'denied');
+      var result = card.querySelector('.permission-state');
+      if (result) result.textContent = decision === 'allow' ? 'Allowed' : 'Rejected';
+      delete permissionCards[id];
+      statusEl.textContent = '';
+    }
+    function renderPermissionRequest(m){
+      hideEmpty();
+      var request = m.request || {};
+      var card = document.createElement('section'); card.className = 'permission-card';
+      var head = document.createElement('div'); head.className = 'permission-head';
+      var icon = document.createElement('span'); icon.className = 'permission-icon'; icon.textContent = '⚠'; head.appendChild(icon);
+      var title = document.createElement('span'); title.textContent = request.title || 'Agent permission required'; head.appendChild(title); card.appendChild(head);
+      var detailParts = [];
+      if (request.tool) detailParts.push('Action: ' + request.tool);
+      if (request.detail) detailParts.push(String(request.detail));
+      if (detailParts.length){ var detail=document.createElement('div'); detail.className='permission-detail'; detail.textContent=detailParts.join('\\n\\n'); card.appendChild(detail); }
+      var actions = document.createElement('div'); actions.className = 'permission-actions';
+      var allow = document.createElement('button'); allow.className = 'permission-allow'; allow.textContent = 'Allow';
+      var reject = document.createElement('button'); reject.className = 'permission-reject'; reject.textContent = 'Reject';
+      var result = document.createElement('span'); result.className = 'permission-state'; result.textContent = 'Waiting for your decision';
+      function decide(decision){
+        allow.disabled = true; reject.disabled = true; result.textContent = 'Applying decision…';
+        vscode.postMessage({type:'permissionDecision', id:String(m.id || ''), decision:decision});
+      }
+      allow.addEventListener('click', function(){ decide('allow'); });
+      reject.addEventListener('click', function(){ decide('deny'); });
+      actions.appendChild(allow); actions.appendChild(reject); actions.appendChild(result); card.appendChild(actions);
+      permissionCards[String(m.id || '')] = card;
+      if (curEl){ ensureStructure(); traceEl.appendChild(card); } else { messagesEl.appendChild(card); }
+      statusEl.textContent = 'Waiting for permission…';
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
     var ICON_SEND = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V7"></path><path d="M6.5 12.5 L12 7 L17.5 12.5"></path></svg>';
     var ICON_STOP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"></rect></svg>';
     function setStreaming(on){ streaming = on; sendBtn.innerHTML = on ? ICON_STOP : ICON_SEND; sendBtn.title = on ? 'Stop' : 'Send'; }
@@ -1472,6 +1654,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     sendBtn.addEventListener('click', doSend);
+    permissionPill.addEventListener('click', function(){ gearBtn.click(); });
     messagesEl.addEventListener('click', function(e){ var a = e.target && e.target.closest ? e.target.closest('a[href]') : null; if (a){ e.preventDefault(); vscode.postMessage({type:'openLink', url:a.getAttribute('href')}); } });
     input.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } });
     input.addEventListener('input', autogrow);
@@ -1578,6 +1761,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           action: function(){ state.provider = p.id; vscode.postMessage({type:'setProvider', provider: p.id}); } });
       });
       var cur = providerOf(state.provider);
+      var permissions = cur && cur.permissionModes ? cur.permissionModes : [];
+      if (state.mode === 'agent' && permissions.length){
+        items.push({ sep: true }, { label: 'Permissions' });
+        items.push({ text: 'Require approval', hint: 'ask before protected actions', sel: state.permission === 'ask',
+          action: function(){ state.permission = 'ask'; refreshPills(); vscode.postMessage({type:'setPermission', permission:'ask'}); } });
+        items.push({ text: 'Bypass permissions', hint: 'danger: unrestricted access', sel: state.permission === 'bypass',
+          action: function(){ state.permission = 'bypass'; refreshPills(); vscode.postMessage({type:'setPermission', permission:'bypass'}); } });
+      }
       var efforts = effortsFor(cur, state.model);
       if (efforts.length > 1){
         items.push({ sep: true }, { label: 'Reasoning effort' });
@@ -1596,6 +1787,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         items.push({ text: state.loggedIn ? 'Sign out' : 'Sign in', hint: state.loggedIn ? 'signed in' : 'required',
           action: function(){ vscode.postMessage({type: state.loggedIn ? 'logout' : 'login'}); } });
       }
+      items.push({ sep: true }, { label: 'sema' });
+      items.push({ text: 'Manage sema…', hint: 'index, setup & doctor',
+        action: function(){ vscode.postMessage({type:'manage'}); } });
+      items.push({ text: 'Update agent CLIs…', hint: 'Claude, Codex & opencode',
+        action: function(){ vscode.postMessage({type:'updateAgents'}); } });
       showMenu(gearBtn, 'right', items);
     });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
@@ -1656,6 +1852,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         state.defaults = m.defaults || {};
         if (m.mode) state.mode = m.mode;
         if (m.effort) state.effort = m.effort;
+        if (m.permission) state.permission = m.permission;
         if (typeof m.useIndex === 'boolean') state.useIndex = m.useIndex;
         if (typeof m.redact === 'boolean') state.redact = m.redact;
         state.requiresKey = !!m.requiresKey;
@@ -1671,13 +1868,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       else if (m.type === 'assistantStart'){ hideEmpty(); if (revealTimer && answerEl && shownLen < answerRaw.length){ answerEl.innerHTML = render(answerRaw); } if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = addBubble('assistant'); curEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>'; answerEl=null; traceEl=null; answerRaw=''; thinkBody=null; started=false; shownLen=0; setStreaming(true); statusEl.textContent = ''; }
       else if (m.type === 'thinking'){ ensureStructure(); if (!thinkBody){ var dt=document.createElement('details'); dt.className='think'; dt.open=true; var sm=document.createElement('summary'); sm.textContent='Thinking'; dt.appendChild(sm); thinkBody=document.createElement('div'); thinkBody.className='think-body'; dt.appendChild(thinkBody); traceEl.appendChild(dt); } thinkBody.textContent += m.text; messagesEl.scrollTop = messagesEl.scrollHeight; }
       else if (m.type === 'activity'){ ensureStructure(); var ac=document.createElement('div'); ac.className='act'; ac.textContent = '⚙ ' + m.tool + (m.detail ? '  ' + m.detail : ''); traceEl.appendChild(ac); messagesEl.scrollTop = messagesEl.scrollHeight; }
+      else if (m.type === 'permissionRequest'){ renderPermissionRequest(m); }
+      else if (m.type === 'permissionResolved'){ resolvePermissionCard(String(m.id || ''), m.decision === 'allow' ? 'allow' : 'deny'); }
       else if (m.type === 'delta'){ ensureStructure(); answerRaw += m.text; startReveal(); }
       else if (m.type === 'assistantEnd'){ if (curEl && !started){ curEl.textContent = '(no output)'; } statusEl.textContent = ''; setStreaming(false); curEl = null; }
       else if (m.type === 'error'){ hideEmpty(); if (curEl && !started){ var ew = curEl.parentNode; if (ew && ew.parentNode){ ew.parentNode.removeChild(ew); } curEl = null; } addBubble('error').textContent = m.message; setStreaming(false); statusEl.textContent = ''; }
-      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = null; answerEl = null; setStreaming(false); statusEl.textContent = ''; if (emptyEl){ emptyEl.style.display = ''; } showSelectedModel(state.model); }
+      else if (m.type === 'clear'){ messagesEl.innerHTML = ''; permissionCards = {}; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; } curEl = null; answerEl = null; setStreaming(false); statusEl.textContent = ''; if (emptyEl){ emptyEl.style.display = ''; } showSelectedModel(state.model); }
       else if (m.type === 'sessions'){ sessionsCache = m.sessions || []; activeSessionId = m.activeId || ''; renderSessions(); }
       else if (m.type === 'restore'){
-        messagesEl.innerHTML = ''; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; }
+        messagesEl.innerHTML = ''; permissionCards = {}; if (revealTimer){ clearInterval(revealTimer); revealTimer = null; }
         curEl = null; answerEl = null; traceEl = null; answerRaw = ''; thinkBody = null; started = false; shownLen = 0; setStreaming(false); statusEl.textContent = '';
         if (m.messages && m.messages.length){ hideEmpty(); m.messages.forEach(function(x){ renderMessage(x.role, x.content, x.attachments); }); }
         else if (emptyEl){ emptyEl.style.display = ''; }

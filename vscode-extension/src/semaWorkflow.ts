@@ -32,6 +32,7 @@ export function buildSystem(
   mode: string,
   activePlan = '',
   activePlanPath = '',
+  useIndex = true,
 ): string {
   const plan = mode === 'plan';
   // CLI agents run under their own coding persona and can inspect the repository. Keep the
@@ -44,7 +45,7 @@ export function buildSystem(
       }
       return parts.join('\n').trim();
     }
-    const parts: string[] = [SEMA_WORKFLOW];
+    const parts: string[] = useIndex ? [SEMA_WORKFLOW] : [];
     if (plan) {
       parts.push('', PLAN_NOTE);
     }
@@ -67,10 +68,12 @@ export function buildSystem(
   const agent = mode === 'agent';
   let lines: string[];
   if (agent) {
+    const semaTools = useIndex
+      ? 'search_code (semantic search of the codebase), get_code (fetch a symbol\'s full source), check_reuse (avoid duplicating existing code), '
+      : '';
     lines = [
       "You are a coding agent working directly in the user's workspace through tools. Available " +
-        'tools: search_code (semantic search of the codebase — usually the best first step), ' +
-        "get_code (fetch a symbol's full source), check_reuse (avoid duplicating existing code), " +
+        'tools: ' + semaTools +
         'grep (regex text search), glob (find files by ' +
         'pattern), list_directory, read_file, write_file, edit_file (surgical string replacement — ' +
         'prefer it over rewriting whole files), delete_file, and run_command (shell: builds, tests, ' +
@@ -79,9 +82,10 @@ export function buildSystem(
         'talk, or questions that do not require the workspace, reply directly without tools.',
     ];
   } else if (plan) {
+    const semaTools = useIndex ? 'search_code, get_code, check_reuse, ' : '';
     lines = [
-      'You are a coding assistant in plan mode. You have read-only tools — search_code, get_code, ' +
-        'check_reuse, grep, glob, list_directory, read_file — to investigate the codebase before planning; use ' +
+      'You are a coding assistant in plan mode. You have read-only tools — ' + semaTools +
+        'grep, glob, list_directory, read_file — to investigate the codebase before planning; use ' +
         'them to ground your plan in the actual code. For a greeting or a message that is not a ' +
         'task to plan, reply briefly without using any tool. ' +
         PLAN_NOTE,
@@ -89,7 +93,7 @@ export function buildSystem(
   } else {
     lines = [ASK_NOTE];
   }
-  if (mode !== 'ask') {
+  if (mode !== 'ask' && useIndex) {
     lines.push('', SEMA_WORKFLOW);
   }
   if (context) {

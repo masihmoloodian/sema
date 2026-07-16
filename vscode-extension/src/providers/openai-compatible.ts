@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions } from './types';
-import { AGENT_TOOLS, READONLY_TOOLS, executeTool, toolDetail, ToolContext } from './tools';
+import { executeTool, toolDetail, ToolContext, toolsForMode } from './tools';
 import { readBase64, toDataUri } from '../attachments';
 
 /** Public list price (USD per 1M tokens) for a model, used to estimate cost. */
@@ -161,7 +161,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
     if (opts.agent || opts.plan) {
       // Agent = full read/write/run toolset; Plan = read-only investigation tools.
       const readOnly = !opts.agent;
-      const tools = readOnly ? READONLY_TOOLS : AGENT_TOOLS;
+      const tools = toolsForMode(readOnly, !!opts.semaBin);
       await this.runAgent(client, opts, messages, tools, readOnly);
     } else {
       await this.runChat(client, opts, messages);

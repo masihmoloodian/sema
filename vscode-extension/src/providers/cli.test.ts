@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider } from './cli';
+import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider, isClaudeProtectedTool } from './cli';
 import { StreamOptions } from './types';
 
 class InspectClaude extends ClaudeCodeProvider {
@@ -147,23 +147,86 @@ test('Claude Code maps Ask, Plan, and Agent to distinct capabilities', () => {
   const provider = new InspectClaude();
   const ask = provider.invocation(baseOptions()).args;
   const plan = provider.invocation({ ...baseOptions(), plan: true }).args;
-  const agent = provider.invocation({ ...baseOptions(), agent: true }).args;
+  const agent = provider.invocation({
+    ...baseOptions(),
+    agent: true,
+    permissionMode: 'bypass',
+  }).args;
   assert.deepEqual(ask.slice(ask.indexOf('--tools')), ['--tools', '', '--model', 'test-model']);
   assert.ok(plan.includes('plan'));
-  assert.ok(!plan.includes('acceptEdits'));
-  assert.ok(agent.includes('acceptEdits'));
-  assert.ok(agent.includes('Bash'));
+  assert.ok(!plan.includes('--dangerously-skip-permissions'));
+  assert.ok(agent.includes('--dangerously-skip-permissions'));
+  assert.deepEqual(provider.permissionModes, ['ask', 'bypass']);
 });
 
-test('Codex starts Plan/Ask read-only and Agent workspace-write', () => {
+test('Claude approval gate covers every mutating built-in tool but not read-only navigation', () => {
+  for (const tool of ['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash']) {
+    assert.equal(isClaudeProtectedTool(tool), true, tool);
+  }
+  for (const tool of ['Read', 'Grep', 'Glob', 'WebSearch']) {
+    assert.equal(isClaudeProtectedTool(tool), false, tool);
+  }
+});
+
+test('Codex keeps Plan/Ask read-only and maps Agent bypass to full access', () => {
   const provider = new InspectCodex();
   const ask = provider.invocation(baseOptions()).args;
   const plan = provider.invocation({ ...baseOptions(), plan: true }).args;
-  const agent = provider.invocation({ ...baseOptions(), agent: true }).args;
+  const agent = provider.invocation({
+    ...baseOptions(),
+    agent: true,
+    permissionMode: 'bypass',
+  }).args;
   assert.equal(ask[ask.indexOf('--sandbox') + 1], 'read-only');
   assert.equal(plan[plan.indexOf('--sandbox') + 1], 'read-only');
-  assert.equal(agent[agent.indexOf('--sandbox') + 1], 'workspace-write');
+  assert.ok(!agent.includes('--sandbox'));
+  assert.ok(agent.includes('--dangerously-bypass-approvals-and-sandbox'));
   assert.ok(agent.includes('test-model'));
+  assert.deepEqual(provider.permissionModes, ['ask', 'bypass']);
+});
+
+async function fakeCodexAppServer(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sema-codex-app-server-'));
+  const file = path.join(dir, 'codex.py');
+  const source = `#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get('method')
+    if method == 'initialize':
+        print(json.dumps({'id': msg['id'], 'result': {}}), flush=True)
+    elif method == 'thread/start':
+        print(json.dumps({'id': msg['id'], 'result': {'thread': {'id': 'app-thread'}, 'model': 'gpt-test'}}), flush=True)
+    elif method == 'turn/start':
+        print(json.dumps({'id': msg['id'], 'result': {'turn': {'id': 'turn-1'}}}), flush=True)
+        print(json.dumps({'id': 900, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'touch approved.txt', 'cwd': '/workspace', 'reason': 'Create the requested file'}}), flush=True)
+    elif msg.get('id') == 900:
+        accepted = msg.get('result', {}).get('decision') == 'accept'
+        text = 'approved' if accepted else 'denied'
+        print(json.dumps({'method': 'item/agentMessage/delta', 'params': {'delta': text}}), flush=True)
+        print(json.dumps({'method': 'thread/tokenUsage/updated', 'params': {'tokenUsage': {'last': {'inputTokens': 8, 'cachedInputTokens': 2, 'outputTokens': 3, 'reasoningOutputTokens': 1}}}}), flush=True)
+        print(json.dumps({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}}), flush=True)
+`;
+  await fs.writeFile(file, source, { mode: 0o755 });
+  return file;
+}
+
+test('Codex app-server pauses protected actions for extension approval', async () => {
+  const cli = await fakeCodexAppServer();
+  const state = options(cli);
+  const approvals: string[] = [];
+  state.opts.agent = true;
+  state.opts.permissionMode = 'ask';
+  state.opts.onPermissionRequest = async (request) => {
+    approvals.push(`${request.provider}:${request.tool}:${request.detail}`);
+    return 'allow';
+  };
+  await new CodexProvider().stream(state.opts);
+  assert.deepEqual(state.deltas, ['approved']);
+  assert.equal(state.sessions[0], 'app-thread');
+  assert.equal(state.models[0], 'gpt-test');
+  assert.match(approvals[0], /codex:touch approved\.txt:.*Create the requested file/s);
+  assert.deepEqual(state.usage, [{ inputTokens: 8, outputTokens: 4, cachedInputTokens: 2 }]);
 });
 
 test('opencode uses plan agent for Ask/Plan and build agent only for Agent', () => {

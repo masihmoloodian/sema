@@ -18,6 +18,9 @@ Sema is a **VS Code extension**, an **agentic assistant**, and a **semantic inde
 
 - **The indexer** gives every provider real semantic search. Through the extension, all providers use it; and Claude Code and Codex can use it directly in their official apps or CLIs — over MCP, no sema extension needed ([see docs](docs/claude-code.md)). Either way they stop burning tokens hunting for files.
 - **The extension** gives you one chat panel with **eight engines** — Claude Code, Codex, Open Code, Anthropic, OpenAI, DeepSeek, OpenRouter, Together AI.
+- **Agent permission controls** let Claude Code and Codex pause protected actions for
+  an inline **Allow/Reject** decision in the Sema chat, or use their clearly marked bypass mode in a
+  trusted sandbox. Each provider keeps its own permission choice.
 
 Sema uses **your existing Claude Code and Codex subscription** — no extra API key, no re-login. Or bring your own key for any API provider.
 

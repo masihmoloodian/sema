@@ -108,7 +108,8 @@ so the agent greps and reads files like any other assistant.
   **New chat** starts fresh.
 - **Ask · Plan · Agent** — **Ask** is ordinary chat with no workspace tools,
   **Plan** investigates with read-only tools and writes only its durable Markdown
-  plan, and **Agent** reads that plan and carries it out. In
+  plan, and **Agent** reads that plan and carries it out. Fresh workspaces start in
+  **Agent** with index and redact off and **Require approval** on. In
   Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`,
   `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`,
   `run_command` — so **even API models read, edit, and run commands**, not just the
@@ -117,7 +118,8 @@ so the agent greps and reads files like any other assistant.
 - **Index-aware** — the agent searches your sema index directly, finding the right
   function by meaning instead of grepping its way there. The **index** toggle also
   injects retrieved code as RAG context — useful for API providers, which can't
-  read files themselves.
+  read files themselves. The toggle is authoritative in every mode: when it is off,
+  chat does not refresh, search, or inject the Sema index.
 - **Reasoning effort** — shown only for the two local CLIs that expose it, and
   filtered for the selected model. **Claude Code** (`--effort`) offers default,
   low, medium, high, extra high, and max. **Codex**
@@ -125,6 +127,18 @@ so the agent greps and reads files like any other assistant.
   GPT-5.4 Mini, and GPT-5.5; adds max on GPT-5.6 Luna; and adds max plus ultra on
   GPT-5.6 Sol and Terra. `default` sends no override. API providers and opencode
   hide the control because their CLIs do not expose this same effort contract.
+- **Agent permissions** — in **Agent** mode with Claude Code or Codex, open the
+  gear menu and choose **Require approval** (the default) or **Bypass permissions**.
+  When bypass is active, the composer bar shows a persistent orange **Full access**
+  indicator.
+  Require approval pauses protected file changes, commands, or access escalation
+  and shows an inline card in the Sema chat with **Allow** and **Reject**. Claude uses the
+  official Agent SDK permission callback; Codex uses the same app-server approval
+  protocol as rich Codex clients. Bypass maps to each CLI's explicit dangerous
+  full-access option and should only be used in a trusted, externally isolated
+  workspace. The choice is stored separately for Claude Code and Codex, and changing
+  it starts a new native agent thread so a permissive session is never resumed under
+  a stricter label.
 - **Attachments** — images, PDFs, and text files to any provider, each in its native
   form: Anthropic and OpenAI as content blocks, the local CLIs as real files on disk
   (`codex -i`, `opencode -f`, Claude Code's Read tool). Text is inlined, so it works
@@ -167,8 +181,9 @@ so the agent greps and reads files like any other assistant.
 
 ## Keep agent CLIs current
 
-New model ids and effort levels often require a newer local CLI. Use
-**Manage → Update agent CLIs…** to update all installed agents or choose one.
+New model ids and effort levels often require a newer local CLI. Open the chat
+gear and choose **Update agent CLIs…** (or **Manage sema…**) to update all installed
+agents or choose one.
 The action opens an integrated terminal so you can see the official updater's
 output and any authentication prompt. The equivalent commands are:
 

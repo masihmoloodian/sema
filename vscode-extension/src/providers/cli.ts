@@ -2,7 +2,16 @@ import { spawn } from 'child_process';
 import { promises as fs, Dirent } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Attachment, AttachmentKind, ChatMessage, ChatProvider, ModelInfo, StreamOptions, TokenUsage } from './types';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import {
+  Attachment,
+  AttachmentKind,
+  ChatMessage,
+  ChatProvider,
+  ModelInfo,
+  StreamOptions,
+  TokenUsage,
+} from './types';
 import { pathFor } from '../attachments';
 
 /** Flatten the system context + conversation into a single prompt string for a CLI. */
@@ -95,6 +104,11 @@ function describeTool(tool: string, input: Record<string, unknown>): string {
     default:
       return '';
   }
+}
+
+/** Claude tools that can change the workspace or execute arbitrary commands. */
+export function isClaudeProtectedTool(tool: string): boolean {
+  return ['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'].includes(tool);
 }
 
 interface Activity {
@@ -301,11 +315,185 @@ export class ClaudeCodeProvider extends CliProvider {
   // (low, medium, high, xhigh, max)". 'max' is Claude-only — Codex rejects it.
   // 'default' means pass no --effort and let the CLI decide.
   readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
+  readonly permissionModes = ['ask', 'bypass'] as const;
   readonly auth = { login: ['auth', 'login'], logout: ['auth', 'logout'], status: ['auth', 'status'] };
 
   /** Claude Code's Read tool handles images and PDFs as well as text. */
   accepts(): readonly AttachmentKind[] {
     return ['image', 'pdf', 'text'];
+  }
+
+  override async stream(opts: StreamOptions): Promise<void> {
+    if (opts.agent && opts.permissionMode === 'ask') {
+      await this.streamWithApprovals(opts);
+      return;
+    }
+    await super.stream(opts);
+  }
+
+  /** Anthropic's Agent SDK supplies the bidirectional per-tool permission callback. */
+  private async streamWithApprovals(opts: StreamOptions): Promise<void> {
+    const { query: claudeQuery } = await import('@anthropic-ai/claude-agent-sdk');
+    const atts = attachmentsFor(opts);
+    const paths = pathsOf(opts, atts);
+    const prompt = promptWithPaths(
+      { ...opts, system: '' },
+      paths,
+    );
+    const abortController = new AbortController();
+    const abort = (): void => abortController.abort();
+    opts.signal.addEventListener('abort', abort, { once: true });
+    const reported = { session: false, model: false, usage: false };
+    const seenActivities = new Set<string>();
+
+    try {
+      const messages = claudeQuery({
+        prompt,
+        options: {
+          abortController,
+          additionalDirectories: paths.length && opts.attachmentsDir ? [opts.attachmentsDir] : undefined,
+          canUseTool: async (toolName, input, context) => {
+            const decision = opts.onPermissionRequest
+              ? await opts.onPermissionRequest({
+                  provider: 'claude-code',
+                  title: context.title || `Claude Code wants to use ${toolName}`,
+                  detail:
+                    context.description ||
+                    context.decisionReason ||
+                    describeTool(toolName, input) ||
+                    undefined,
+                  tool: toolName,
+                })
+              : 'deny';
+            return decision === 'allow'
+              ? {
+                  behavior: 'allow' as const,
+                  updatedInput: input,
+                  toolUseID: context.toolUseID,
+                  decisionClassification: 'user_temporary' as const,
+                }
+              : {
+                  behavior: 'deny' as const,
+                  message: 'The user rejected this action in sema.',
+                  toolUseID: context.toolUseID,
+                  decisionClassification: 'user_reject' as const,
+                };
+          },
+          hooks: {
+            PreToolUse: [{
+              hooks: [async (input) => {
+                if (
+                  input.hook_event_name !== 'PreToolUse' ||
+                  !isClaudeProtectedTool(input.tool_name)
+                ) {
+                  return {};
+                }
+                const toolInput =
+                  input.tool_input && typeof input.tool_input === 'object'
+                    ? input.tool_input as Record<string, unknown>
+                    : {};
+                const decision = opts.onPermissionRequest
+                  ? await opts.onPermissionRequest({
+                      provider: 'claude-code',
+                      title: `Claude Code wants to use ${input.tool_name}`,
+                      detail: describeTool(input.tool_name, toolInput) || undefined,
+                      tool: input.tool_name,
+                    })
+                  : 'deny';
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: 'PreToolUse' as const,
+                    permissionDecision: decision,
+                    permissionDecisionReason:
+                      decision === 'allow'
+                        ? 'The user allowed this action in sema.'
+                        : 'The user rejected this action in sema.',
+                  },
+                };
+              }],
+            }],
+          },
+          cwd: opts.cwd,
+          effort:
+            opts.effort && opts.effort !== 'default'
+              ? (opts.effort as 'low' | 'medium' | 'high' | 'xhigh' | 'max')
+              : undefined,
+          includePartialMessages: true,
+          model: opts.model && opts.model !== 'default' ? opts.model : undefined,
+          pathToClaudeCodeExecutable: opts.cliBin,
+          permissionMode: 'default',
+          resume: opts.sessionId,
+          skills: 'all',
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.system },
+        },
+      });
+
+      for await (const message of messages) {
+        this.consumeSdkMessage(
+          message,
+          opts,
+          seenActivities,
+          reported,
+        );
+      }
+    } finally {
+      opts.signal.removeEventListener('abort', abort);
+    }
+
+  }
+
+  private consumeSdkMessage(
+    message: SDKMessage,
+    opts: StreamOptions,
+    seenActivities: Set<string>,
+    reported: { session: boolean; model: boolean; usage: boolean },
+  ): void {
+    const event = message as unknown;
+    const session = this.extractSession(event);
+    if (!reported.session && session && opts.onSession) {
+      opts.onSession(session);
+      reported.session = true;
+    }
+    const model = this.extractModel(event);
+    if (!reported.model && model && opts.onModel) {
+      opts.onModel(model);
+      reported.model = true;
+    }
+    const delta = this.extractDelta(event);
+    if (delta) {
+      opts.onDelta(delta);
+    }
+    const thinking = this.extractThinking(event);
+    if (thinking && opts.onThinking) {
+      opts.onThinking(thinking);
+    }
+    if (opts.onActivity) {
+      for (const activity of this.extractActivities(event)) {
+        if (activity.id && seenActivities.has(activity.id)) {
+          continue;
+        }
+        if (activity.id) {
+          seenActivities.add(activity.id);
+        }
+        opts.onActivity(activity.tool, activity.detail);
+      }
+    }
+    const usage = this.extractUsage(event);
+    if (!reported.usage && usage && opts.onUsage) {
+      opts.onUsage(usage);
+      reported.usage = true;
+    }
+    const sdkResult = message as { type?: string; is_error?: boolean; errors?: string[] };
+    if (sdkResult.type === 'result' && sdkResult.is_error && sdkResult.errors?.length) {
+      throw new Error(sdkResult.errors.join('\n'));
+    }
+    const error = this.checkError(event);
+    if (error) {
+      throw new Error(error);
+    }
+    if (sdkResult.type === 'result' && sdkResult.is_error) {
+      throw new Error(sdkResult.errors?.join('\n') || 'Claude Code returned an error.');
+    }
   }
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
@@ -327,11 +515,9 @@ export class ClaudeCodeProvider extends CliProvider {
       // Plan mode: explore read-only and present a plan; edits are blocked.
       args.push('--permission-mode', 'plan');
     } else if (opts.agent) {
-      // Agent mode is explicitly full-capability, matching API providers' edit_file
-      // + run_command toolset. acceptEdits handles files; preapproving Bash lets a
-      // headless run build/test without using bypassPermissions. Put another flag
-      // after the variadic --allowedTools so it cannot swallow the prompt.
-      args.push('--allowedTools', 'Bash', '--permission-mode', 'acceptEdits');
+      // Approval mode uses the Agent SDK above. This CLI path is the explicit,
+      // dangerous bypass selected by the user in the extension.
+      args.push('--dangerously-skip-permissions');
     } else {
       // Ask is conversational, not an agent run. An empty allow-list prevents Claude
       // Code from inspecting the workspace despite being an agentic CLI internally.
@@ -460,11 +646,330 @@ export class CodexProvider extends CliProvider {
   // `-c model_reasoning_effort=<level>`. Parsing locally is not enough to qualify a
   // Provider-wide union for custom ids; curated models narrow this via ModelInfo.efforts.
   readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+  readonly permissionModes = ['ask', 'bypass'] as const;
   readonly auth = { login: ['login'], logout: ['logout'], status: ['login', 'status'] };
 
   /** `codex exec` attaches images only (`-i`); its Read tool is text. No PDF path. */
   accepts(): readonly AttachmentKind[] {
     return ['image', 'text'];
+  }
+
+  override async stream(opts: StreamOptions): Promise<void> {
+    if (opts.agent && opts.permissionMode === 'ask') {
+      await this.streamWithApprovals(opts);
+      return;
+    }
+    await super.stream(opts);
+  }
+
+  /** Codex app-server is the official bidirectional transport used by rich clients. */
+  private async streamWithApprovals(opts: StreamOptions): Promise<void> {
+    const exe = opts.cliBin && opts.cliBin.trim() ? opts.cliBin : 'codex';
+    const child = spawn(exe, ['app-server'], {
+      cwd: opts.cwd || undefined,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    let nextId = 1;
+    let buffer = '';
+    let stderr = '';
+    let settled = false;
+    let lastUsage: TokenUsage | null = null;
+    const pending = new Map<
+      number,
+      { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }
+    >();
+    let finishResolve!: () => void;
+    let finishReject!: (error: Error) => void;
+    const finished = new Promise<void>((resolve, reject) => {
+      finishResolve = resolve;
+      finishReject = reject;
+    });
+
+    const fail = (error: Error): void => {
+      if (!settled) {
+        settled = true;
+        finishReject(error);
+      }
+    };
+    const complete = (): void => {
+      if (!settled) {
+        settled = true;
+        finishResolve();
+      }
+    };
+    const send = (message: Record<string, unknown>): void => {
+      if (!child.stdin.destroyed) {
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      }
+    };
+    const request = (method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        send({ method, id, params });
+      });
+    };
+
+    const decide = async (
+      request: { title: string; detail?: string; tool?: string },
+    ): Promise<'allow' | 'deny'> => {
+      return opts.onPermissionRequest
+        ? opts.onPermissionRequest({ provider: 'codex', ...request })
+        : 'deny';
+    };
+
+    const handleServerRequest = async (message: {
+      id: number | string;
+      method: string;
+      params?: Record<string, unknown>;
+    }): Promise<void> => {
+      const params = message.params ?? {};
+      if (message.method === 'item/commandExecution/requestApproval') {
+        const command = String(params.command ?? '');
+        const cwd = String(params.cwd ?? '');
+        const reason = String(params.reason ?? '');
+        const decision = await decide({
+          title: 'Codex wants to run a command',
+          detail: [command, cwd ? `Working directory: ${cwd}` : '', reason].filter(Boolean).join('\n\n'),
+          tool: command || 'Command execution',
+        });
+        send({ id: message.id, result: { decision: decision === 'allow' ? 'accept' : 'decline' } });
+        return;
+      }
+      if (message.method === 'item/fileChange/requestApproval') {
+        const reason = String(params.reason ?? '');
+        const root = String(params.grantRoot ?? '');
+        const decision = await decide({
+          title: 'Codex wants to modify files',
+          detail: [reason, root ? `Requested write root: ${root}` : ''].filter(Boolean).join('\n\n'),
+          tool: 'File change',
+        });
+        send({ id: message.id, result: { decision: decision === 'allow' ? 'accept' : 'decline' } });
+        return;
+      }
+      if (message.method === 'item/permissions/requestApproval') {
+        const requested = (params.permissions ?? {}) as Record<string, unknown>;
+        const decision = await decide({
+          title: 'Codex wants additional access',
+          detail: String(params.reason ?? '') || JSON.stringify(requested),
+          tool: 'Permission escalation',
+        });
+        send({
+          id: message.id,
+          result: {
+            permissions: decision === 'allow' ? requested : {},
+            scope: 'turn',
+          },
+        });
+        return;
+      }
+      if (message.method === 'execCommandApproval') {
+        const command = Array.isArray(params.command)
+          ? params.command.map(String).join(' ')
+          : String(params.command ?? '');
+        const decision = await decide({
+          title: 'Codex wants to run a command',
+          detail: [command, String(params.reason ?? '')].filter(Boolean).join('\n\n'),
+          tool: command || 'Command execution',
+        });
+        send({ id: message.id, result: { decision: decision === 'allow' ? 'approved' : 'denied' } });
+        return;
+      }
+      if (message.method === 'applyPatchApproval') {
+        const files = Object.keys((params.fileChanges ?? {}) as Record<string, unknown>);
+        const decision = await decide({
+          title: 'Codex wants to modify files',
+          detail: [files.join('\n'), String(params.reason ?? '')].filter(Boolean).join('\n\n'),
+          tool: 'File change',
+        });
+        send({ id: message.id, result: { decision: decision === 'allow' ? 'approved' : 'denied' } });
+        return;
+      }
+      if (message.method === 'item/tool/requestUserInput') {
+        // Sema's composer cannot answer a second, in-flight questionnaire yet. Dismiss
+        // it explicitly so the Codex turn can continue instead of hanging forever.
+        send({ id: message.id, result: { answers: {} } });
+        return;
+      }
+      send({
+        id: message.id,
+        error: { code: -32601, message: `Unsupported Codex app-server request: ${message.method}` },
+      });
+    };
+
+    const handleMessage = (message: Record<string, unknown>): void => {
+      const method = typeof message.method === 'string' ? message.method : '';
+      if (method && message.id !== undefined) {
+        void handleServerRequest(message as {
+          id: number | string;
+          method: string;
+          params?: Record<string, unknown>;
+        }).catch((error: Error) => fail(error));
+        return;
+      }
+      if (typeof message.id === 'number') {
+        const waiter = pending.get(message.id);
+        if (waiter) {
+          pending.delete(message.id);
+          const rpcError = message.error as { message?: string } | undefined;
+          if (rpcError) {
+            waiter.reject(new Error(rpcError.message || 'Codex app-server request failed.'));
+          } else {
+            waiter.resolve((message.result ?? {}) as Record<string, unknown>);
+          }
+          return;
+        }
+      }
+
+      const params = (message.params ?? {}) as Record<string, unknown>;
+      if (method === 'item/agentMessage/delta') {
+        const delta = String(params.delta ?? '');
+        if (delta) {
+          opts.onDelta(delta);
+        }
+      } else if (
+        (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') &&
+        opts.onThinking
+      ) {
+        const delta = String(params.delta ?? '');
+        if (delta) {
+          opts.onThinking(delta);
+        }
+      } else if (method === 'item/started' && opts.onActivity) {
+        const item = (params.item ?? {}) as Record<string, unknown>;
+        if (item.type === 'commandExecution') {
+          opts.onActivity('Run', String(item.command ?? '').slice(0, 60));
+        } else if (item.type === 'fileChange') {
+          opts.onActivity('Edit', '');
+        }
+      } else if (method === 'thread/tokenUsage/updated') {
+        const tokenUsage = (params.tokenUsage ?? {}) as Record<string, unknown>;
+        const last = (tokenUsage.last ?? {}) as Record<string, unknown>;
+        lastUsage = {
+          inputTokens: Number(last.inputTokens ?? 0),
+          outputTokens: Number(last.outputTokens ?? 0) + Number(last.reasoningOutputTokens ?? 0),
+          cachedInputTokens: Number(last.cachedInputTokens ?? 0),
+        };
+      } else if (method === 'turn/completed') {
+        const turn = (params.turn ?? {}) as Record<string, unknown>;
+        if (turn.status === 'failed') {
+          const error = (turn.error ?? {}) as Record<string, unknown>;
+          fail(new Error(String(error.message ?? 'Codex reported a failed turn.')));
+        } else {
+          if (lastUsage && opts.onUsage) {
+            opts.onUsage(lastUsage);
+          }
+          complete();
+        }
+      } else if (method === 'error') {
+        const error = (params.error ?? params) as Record<string, unknown>;
+        fail(new Error(String(error.message ?? 'Codex app-server reported an error.')));
+      }
+    };
+
+    child.stdout.on('data', (chunk: string) => {
+      buffer += chunk;
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) {
+          continue;
+        }
+        try {
+          handleMessage(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // Ignore non-protocol output; app-server diagnostics are also captured on stderr.
+        }
+      }
+    });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      fail(
+        error.code === 'ENOENT'
+          ? new Error(`${exe} not found — install it and log in, or set its path in sema settings.`)
+          : error,
+      );
+    });
+    child.on('close', (code) => {
+      if (opts.signal.aborted) {
+        complete();
+      } else if (!settled) {
+        fail(new Error(stderr.trim().split('\n').pop() || `codex app-server exited with code ${code}`));
+      }
+    });
+    const abort = (): void => {
+      child.kill();
+      complete();
+    };
+    opts.signal.addEventListener('abort', abort, { once: true });
+
+    try {
+      await request('initialize', {
+        clientInfo: { name: 'sema_vscode', title: 'sema VS Code Extension', version: '0.4.0' },
+      });
+      send({ method: 'initialized', params: {} });
+      const effort = opts.effort && opts.effort !== 'default' ? opts.effort : undefined;
+      const threadParams: Record<string, unknown> = {
+        cwd: opts.cwd,
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandbox: 'read-only',
+      };
+      if (opts.model && opts.model !== 'default') {
+        threadParams.model = opts.model;
+      }
+      if (effort) {
+        threadParams.config = { model_reasoning_effort: effort };
+      }
+      if (opts.sessionId) {
+        threadParams.threadId = opts.sessionId;
+      }
+      const threadResult = await request(
+        opts.sessionId ? 'thread/resume' : 'thread/start',
+        threadParams,
+      );
+      const thread = (threadResult.thread ?? {}) as Record<string, unknown>;
+      const threadId = String(thread.id ?? opts.sessionId ?? '');
+      if (!threadId) {
+        throw new Error('Codex app-server did not return a thread id.');
+      }
+      opts.onSession?.(threadId);
+      const resolvedModel = String(threadResult.model ?? '');
+      if (resolvedModel) {
+        opts.onModel?.(resolvedModel);
+      }
+
+      const atts = attachmentsFor(opts);
+      const images = pathsOf(opts, atts, 'image');
+      const prompt = opts.sessionId
+        ? promptOrDefault(opts.messages[opts.messages.length - 1]?.content ?? '', atts)
+        : promptOrDefault(flattenPrompt(opts.system, opts.messages), atts);
+      const input: Array<Record<string, unknown>> = [
+        { type: 'text', text: prompt, text_elements: [] },
+        ...images.map((imagePath) => ({ type: 'localImage', path: imagePath })),
+      ];
+      await request('turn/start', {
+        threadId,
+        input,
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        cwd: opts.cwd,
+        model: opts.model && opts.model !== 'default' ? opts.model : undefined,
+        effort,
+      });
+      await finished;
+    } finally {
+      opts.signal.removeEventListener('abort', abort);
+      for (const waiter of pending.values()) {
+        waiter.reject(new Error('Codex app-server connection closed.'));
+      }
+      pending.clear();
+      child.kill();
+    }
   }
 
   protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
@@ -480,7 +985,18 @@ export class CodexProvider extends CliProvider {
       // Resume — the session keeps its model/sandbox; send only the new user turn.
       return {
         bin: 'codex',
-        args: ['exec', 'resume', '--json', '--skip-git-repo-check', ...effort, ...images, opts.sessionId],
+        args: [
+          'exec',
+          'resume',
+          '--json',
+          '--skip-git-repo-check',
+          ...(opts.agent && opts.permissionMode === 'bypass'
+            ? ['--dangerously-bypass-approvals-and-sandbox']
+            : []),
+          ...effort,
+          ...images,
+          opts.sessionId,
+        ],
         prompt: promptOrDefault(opts.messages[opts.messages.length - 1]?.content ?? '', atts),
       };
     }
@@ -488,10 +1004,12 @@ export class CodexProvider extends CliProvider {
       'exec',
       '--json',
       '--skip-git-repo-check',
+      ...(opts.agent && opts.permissionMode === 'bypass'
+        ? ['--dangerously-bypass-approvals-and-sandbox']
+        : []),
       ...effort,
       ...images,
-      '--sandbox',
-      opts.agent ? 'workspace-write' : 'read-only',
+      ...(opts.agent && opts.permissionMode === 'bypass' ? [] : ['--sandbox', 'read-only']),
     ];
     if (opts.model && opts.model !== 'default') {
       args.push('-m', opts.model);
