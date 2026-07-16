@@ -15,6 +15,9 @@ sema watch . --workspace my.code-workspace    Watch all workspace folders simult
 sema setup                                    Detect installed AI CLIs and register sema with each in one shot
 sema setup --skip-codex                       Register all detected CLIs except Codex (also --skip-claude / --skip-opencode)
 sema setup --uninstall                        Remove sema from every detected AI CLI
+sema update --check                           Show installed Claude Code, Codex, and opencode versions
+sema update                                   Run every installed coding agent's official self-updater
+sema update --provider codex                  Update one agent only (claude / codex / opencode; repeatable)
 sema init --claude                            Register sema as MCP server with Claude Code (via claude mcp add -s user)
 sema init --claude --root ~/code              Multi-project: serve every indexed project under ~/code (repeatable)
 sema init --claude --uninstall                Remove sema from Claude Code and kill running processes
@@ -46,3 +49,12 @@ It has no `--opencode` flag — use `sema setup` to reach opencode.
 
 Both accept `--root <dir>` (repeatable) to serve every indexed project beneath a
 directory at once. See [multi-project mode](multi-project.md).
+
+## Updating coding-agent CLIs
+
+`sema update` keeps the local agent executables current without replacing their
+authentication or configuration. It invokes each project's self-updater:
+`claude update`, `codex update`, and `opencode upgrade`. Missing agents are
+skipped; use `--provider` one or more times to target a subset. After updating,
+restart active agent sessions and reload the VS Code extension so its model and
+effort selectors reflect the installed versions.

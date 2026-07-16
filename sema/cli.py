@@ -2,15 +2,20 @@
 
 import shutil
 import json
+import subprocess
 from pathlib import Path
 import click
 from rich.console import Console
-from rich.table import Table
 
 console = Console()
 
 DEFAULT_INDEX_DIR = ".sema/index"
 DEFAULT_META_FILE = ".sema/meta.json"
+
+
+def _launcher_environment(executable: str | Path) -> Path:
+    """Return a command launcher's environment root, following uv/pipx bin symlinks."""
+    return Path(executable).resolve().parent.parent
 
 
 def _emit_json(data: object) -> None:
@@ -23,6 +28,54 @@ def _emit_json(data: object) -> None:
 def main():
     """sema — semantic codebase indexer for Claude Code."""
     pass
+
+
+_AGENT_CLIS = {
+    "claude": {"binary": "claude", "update": ["update"], "version": ["--version"]},
+    "codex": {"binary": "codex", "update": ["update"], "version": ["--version"]},
+    "opencode": {"binary": "opencode", "update": ["upgrade"], "version": ["--version"]},
+}
+
+
+@main.command(name="update")
+@click.option(
+    "--provider",
+    "providers",
+    multiple=True,
+    type=click.Choice(tuple(_AGENT_CLIS)),
+    help="Update only this agent CLI (repeatable). Defaults to every installed agent.",
+)
+@click.option("--check", is_flag=True, help="Show installed versions without updating.")
+def update_agents(providers: tuple[str, ...], check: bool) -> None:
+    """Check or update supported coding-agent CLIs.
+
+    Uses each project's official self-updater: `claude update`, `codex update`,
+    and `opencode upgrade`. Authentication and configuration are preserved.
+    """
+    selected = providers or tuple(_AGENT_CLIS)
+    failures = 0
+    found = 0
+    for provider in selected:
+        spec = _AGENT_CLIS[provider]
+        binary = shutil.which(spec["binary"])
+        label = "Claude Code" if provider == "claude" else provider
+        if not binary:
+            console.print(f"[dim]–[/dim] {label}: not installed")
+            continue
+        found += 1
+        args = spec["version"] if check else spec["update"]
+        if not check:
+            console.print(f"\n[bold]Updating {label}[/bold]")
+        result = subprocess.run([binary, *args], check=False)
+        if result.returncode != 0:
+            failures += 1
+            console.print(f"[red]✗[/red] {label}: command exited {result.returncode}")
+    if not found:
+        raise click.ClickException("No supported agent CLIs were found on PATH.")
+    if failures:
+        raise click.ClickException(f"{failures} agent update(s) failed.")
+    if not check:
+        console.print("\n[green]✔[/green] Agent CLI updates finished. Restart active agent sessions and reload the extension to refresh models.")
 
 
 @main.command()
@@ -88,16 +141,21 @@ def index(path: str, workspace: str | None, reset: bool, verbose: bool):
         console.print(f"    {lang}: {count}")
 
     try:
-        sema_version = importlib.metadata.version("sema")
+        sema_version = importlib.metadata.version("sema-mcp")
     except importlib.metadata.PackageNotFoundError:
         sema_version = "dev"
+
+    # `total` describes work performed by this invocation, not the whole index.
+    # Metadata is consumed by doctor/status and must describe the committed store
+    # after an incremental run where most files were skipped.
+    all_meta = store.get_all_metadata()
 
     meta = {
         "version": "1",
         "model": "all-MiniLM-L6-v2",
-        "indexed_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "chunk_count": total["chunks"],
-        "file_count": total["files"],
+        "indexed_at": datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
+        "chunk_count": len(all_meta),
+        "file_count": len({m.get("file", "") for m in all_meta if m.get("file")}),
         "sema_version": sema_version,
     }
     meta_path = index_root / DEFAULT_META_FILE
@@ -135,7 +193,8 @@ def _serve_args(project_root: Path | None, roots: list[Path] | None) -> list[str
 
 def _claude_mcp_add(project_root: Path | None = None, roots: list[Path] | None = None, scope: str = "user") -> bool:
     """Register sema via `claude mcp add`. Returns True on success."""
-    import subprocess, sys
+    import subprocess
+    import sys
     sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
     claude_bin = _find_claude_bin()
     if not claude_bin:
@@ -297,6 +356,31 @@ def _report_discovered(roots: list[Path]) -> None:
         console.print("[yellow]  No indexed projects found yet — run [bold]sema index .[/bold] inside each project.[/yellow]")
 
 
+def _install_navigation_skills(
+    project_root: Path,
+    roots: list[Path],
+    providers: set[str],
+) -> None:
+    """Install the portable sema skill in one project or every discovered project."""
+    if not providers:
+        return
+    from .mcp.registry import discover_projects
+    from .skills import install_provider_skills
+
+    projects = [p for p, _index in discover_projects(roots)] if roots else [project_root]
+    for project in projects:
+        for result in install_provider_skills(project, providers):
+            relative = result.path.relative_to(project)
+            if result.status == "installed":
+                console.print(f"[green]✔[/green] Installed sema skill: {project / relative}")
+            elif result.status == "updated":
+                console.print(f"[green]✔[/green] Updated sema skill: {project / relative}")
+            elif result.status == "preserved":
+                console.print(
+                    f"[yellow]–[/yellow] Preserved customized skill: {project / relative}"
+                )
+
+
 def _init_claude(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
     import subprocess
     if uninstall:
@@ -332,6 +416,7 @@ def _init_claude(uninstall: bool, project_root: Path, index_path: Path, roots: l
             console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope, multi-project)")
         else:
             console.print("[green]✔[/green] Registered as MCP server 'sema' (user scope)")
+        _install_navigation_skills(project_root, roots, {"claude"})
         console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Claude Code to confirm.")
     else:
         manual = " ".join(_serve_args(project_root, roots or None))
@@ -362,6 +447,7 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: li
         console.print(f"[dim]  {config_path}[/dim]")
     else:
         console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
+    _install_navigation_skills(project_root, roots, {"codex"})
     console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Codex to confirm.")
 
 
@@ -409,6 +495,7 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
     console.print(f"[bold]{verb} sema[/bold]")
 
     any_client = False
+    skill_providers: set[str] = set()
 
     # ── Claude Code (user scope) ──────────────────────────────────────────────
     if skip_claude:
@@ -423,6 +510,8 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
         else:
             ok = _claude_mcp_add(project_root=project_root, roots=root_paths or None, scope="user")
             console.print(f"  Claude Code  {'[green]✔ registered[/green]' if ok else '[red]✗ failed[/red]'}")
+            if ok:
+                skill_providers.add("claude")
 
     # ── Codex (project scope) ─────────────────────────────────────────────────
     if skip_codex:
@@ -438,6 +527,7 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
         else:
             changed, _cfg = _codex_config_add(project_root, roots=root_paths or None)
             console.print(f"  Codex        {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+            skill_providers.add("codex")
 
     # ── opencode (project scope) ──────────────────────────────────────────────
     if skip_opencode:
@@ -453,6 +543,10 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
         else:
             changed, _cfg = _opencode_config_add(project_root, roots=root_paths or None)
             console.print(f"  opencode     {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+            skill_providers.add("opencode")
+
+    if not uninstall:
+        _install_navigation_skills(project_root, root_paths, skill_providers)
 
     console.print()
     if not any_client and not uninstall:
@@ -486,6 +580,7 @@ def search(query: str, top_k: int, all_types: bool, as_json: bool):
     store = SemaStore(index_path)
     embedder = Embedder()
 
+    top_k = max(1, min(top_k, 10))
     chunk_types = None if all_types else _CODE_CHUNK_TYPES
     fetch_k = min(top_k * 3, 30)
 
@@ -535,6 +630,15 @@ def search(query: str, top_k: int, all_types: bool, as_json: bool):
             f"[green]{score_pct}% match[/green]"
         )
         console.print(f"    [dim]{r['type']}:[/dim] {r['signature']}\n")
+
+
+@main.command(name="_query-server", hidden=True)
+@click.option("--project", default=".", type=click.Path(exists=True))
+def query_server(project: str):
+    """Run the private persistent JSONL query worker used by editor clients."""
+    from .query_server import serve_query_worker
+
+    serve_query_worker(Path(project))
 
 
 @main.command()
@@ -658,6 +762,22 @@ def reuse(description: str, project: str, as_json: bool):
         console.print("  [dim]No existing implementation found — prefer stdlib/existing deps, keep it minimal.[/dim]")
 
 
+def _detect_index_changes(project_root: Path) -> tuple[int, int]:
+    """Return (changed_or_new, deleted) files relative to the stored hash set."""
+    from .store.hashes import FileHashStore
+    from .utils.file_walker import walk_project
+
+    hashes = FileHashStore(project_root / ".sema")
+    files = list(walk_project(project_root))
+    current = {str(path.relative_to(project_root)): path for path in files}
+    changed = sum(
+        not hashes.is_unchanged(relative, path)
+        for relative, path in current.items()
+    )
+    deleted = len(hashes.known_paths() - current.keys())
+    return changed, deleted
+
+
 def _emit_status_json(project_root: Path, meta_path: Path) -> None:
     """Emit index + registration status as JSON. Cheap — no subprocesses."""
     from datetime import datetime, timezone
@@ -678,6 +798,8 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
         indexed_at = meta.get("indexed_at")
         age_days = None
         stale = False
+        changed_files = 0
+        deleted_files = 0
         if indexed_at:
             try:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(indexed_at.replace("Z", "+00:00"))
@@ -685,6 +807,12 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
                 stale = age.days > 7
             except Exception:
                 pass
+        try:
+            changed_files, deleted_files = _detect_index_changes(project_root)
+            stale = stale or changed_files > 0 or deleted_files > 0
+        except Exception:
+            # Status remains useful even if one file becomes unreadable.
+            pass
         index.update({
             "chunks": chunks,
             "files": files,
@@ -692,6 +820,8 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
             "model": meta.get("model"),
             "age_days": age_days,
             "stale": stale,
+            "changed_files": changed_files,
+            "deleted_files": deleted_files,
         })
 
     claude_registered = False
@@ -735,7 +865,7 @@ def _refresh_meta(index_root: Path, store) -> None:
     all_meta = store.get_all_metadata()
     meta["chunk_count"] = len(all_meta)
     meta["file_count"] = len({m.get("file", "") for m in all_meta if m.get("file")})
-    meta["indexed_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    meta["indexed_at"] = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
     meta.setdefault("model", "all-MiniLM-L6-v2")
     meta.setdefault("version", "1")
     meta_path.parent.mkdir(parents=True, exist_ok=True)
@@ -907,7 +1037,7 @@ def status(verbose: bool, as_json: bool):
     console.print()
     index_path = project_root / DEFAULT_INDEX_DIR
     if not meta_path.exists():
-        console.print(f"[bold]Index[/bold]  [red]✗ No index found[/red] — run [bold]sema index .[/bold]")
+        console.print("[bold]Index[/bold]  [red]✗ No index found[/red] — run [bold]sema index .[/bold]")
     else:
         meta = json.loads(meta_path.read_text())
 
@@ -924,7 +1054,7 @@ def status(verbose: bool, as_json: bool):
             total_chunks = meta.get("chunk_count", meta.get("chunks", "?"))
             total_files = meta.get("file_count", meta.get("files", "?"))
 
-        console.print(f"[bold]Index[/bold]")
+        console.print("[bold]Index[/bold]")
         console.print(f"  Project  {project_root}")
         console.print(f"  Chunks   {total_chunks}")
         console.print(f"  Files    {total_files}")
@@ -935,7 +1065,7 @@ def status(verbose: bool, as_json: bool):
             console.print(f"  Version  {meta.get('sema_version', '?')}")
             langs = meta.get("languages", {})
             if langs:
-                console.print(f"  Languages")
+                console.print("  Languages")
                 for lang, count in sorted(langs.items()):
                     console.print(f"    [dim]{lang}: {count}[/dim]")
 
@@ -949,7 +1079,7 @@ def status(verbose: bool, as_json: bool):
         color = "green" if match else "yellow"
         console.print(f"  Serving      [{color}]{serving}[/{color}]")
         if not match:
-            console.print(f"  [yellow]  ⚠  Serving a different project than cwd[/yellow]")
+            console.print("  [yellow]  ⚠  Serving a different project than cwd[/yellow]")
             console.print(f"  [dim]     cwd:     {project_root}[/dim]")
             console.print(f"  [dim]     serving: {serving}[/dim]")
             console.print(f"  [dim]     Fix: {fix_cmd}[/dim]")
@@ -968,10 +1098,10 @@ def status(verbose: bool, as_json: bool):
             here = " [green](cwd)[/green]" if pr == project_root else ""
             console.print(f"  [dim]     • {pr}[/dim]{here}")
         if not cwd_served:
-            console.print(f"  [yellow]  ⚠  Current directory is not under any served root[/yellow]")
+            console.print("  [yellow]  ⚠  Current directory is not under any served root[/yellow]")
 
     console.print()
-    console.print(f"[bold]MCP server[/bold]")
+    console.print("[bold]MCP server[/bold]")
 
     # Claude Code
     claude = _shutil.which("claude")
@@ -989,12 +1119,12 @@ def status(verbose: bool, as_json: bool):
                             serving = parts[1].strip().split()[0]
 
                     if "Failed" in line:
-                        console.print(f"  Claude Code  [red]✗ Failed[/red]")
-                        console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                        console.print("  Claude Code  [red]✗ Failed[/red]")
+                        console.print("  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
                     elif "Connected" in line or "✓" in line:
-                        console.print(f"  Claude Code  [green]✔ Connected[/green]")
+                        console.print("  Claude Code  [green]✔ Connected[/green]")
                     else:
-                        console.print(f"  Claude Code  [yellow]⚠ Registered (not connected)[/yellow]")
+                        console.print("  Claude Code  [yellow]⚠ Registered (not connected)[/yellow]")
 
                     if served_roots:
                         _print_serving_roots(served_roots, project_root)
@@ -1006,9 +1136,9 @@ def status(verbose: bool, as_json: bool):
                         console.print(f"  [dim]  config:  {claude_cfg}[/dim]")
                         console.print(f"  [dim]  command: {serving and f'sema serve --project {serving}'}[/dim]")
         else:
-            console.print(f"  Claude Code  [yellow]–[/yellow] not registered — run: sema init --claude")
+            console.print("  Claude Code  [yellow]–[/yellow] not registered — run: sema init --claude")
     else:
-        console.print(f"  Claude Code  [dim]–[/dim] claude CLI not found")
+        console.print("  Claude Code  [dim]–[/dim] claude CLI not found")
 
     # Codex
     codex_config = project_root / ".codex" / "config.toml"
@@ -1026,13 +1156,13 @@ def status(verbose: bool, as_json: bool):
             cmd_ok = True
             cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
             if cm and not Path(cm.group(1)).exists():
-                console.print(f"  Codex        [red]✗ Failed[/red]")
+                console.print("  Codex        [red]✗ Failed[/red]")
                 console.print(f"  [dim]  Binary not found: {cm.group(1)}[/dim]")
-                console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                console.print("  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
                 cmd_ok = False
 
             if cmd_ok:
-                console.print(f"  Codex        [green]✔ Connected[/green]")
+                console.print("  Codex        [green]✔ Connected[/green]")
 
             if served_roots:
                 _print_serving_roots(served_roots, project_root)
@@ -1042,14 +1172,14 @@ def status(verbose: bool, as_json: bool):
             if verbose:
                 console.print(f"  [dim]  config:  {codex_config}[/dim]")
         else:
-            console.print(f"  Codex        [yellow]–[/yellow] not registered — run: sema init --codex")
+            console.print("  Codex        [yellow]–[/yellow] not registered — run: sema init --codex")
     else:
-        console.print(f"  Codex        [dim]–[/dim] not registered — run: sema init --codex")
+        console.print("  Codex        [dim]–[/dim] not registered — run: sema init --codex")
 
     # Binary
     if verbose:
         console.print()
-        console.print(f"[bold]Binary[/bold]")
+        console.print("[bold]Binary[/bold]")
         binary = _shutil.which("sema")
         console.print(f"  Path     {binary or '[red]not found[/red]'}")
         import sys
@@ -1150,43 +1280,45 @@ def doctor():
 
     # ── 1. Binary ────────────────────────────────────────────────────────────
     binary = shutil.which("sema")
-    console.print(f"\n[bold]1. Binary[/bold]")
+    console.print("\n[bold]1. Binary[/bold]")
     if binary:
         console.print(f"  [green]✔[/green] Found: {binary}")
     else:
-        console.print(f"  [red]✗[/red] sema not found on PATH")
-        console.print(f"  [dim]  Fix: add sema's .venv/bin to PATH, then source ~/.zshrc[/dim]")
+        console.print("  [red]✗[/red] sema not found on PATH")
+        console.print("  [dim]  Fix: add sema's .venv/bin to PATH, then source ~/.zshrc[/dim]")
         ok = False
 
     # ── 2. Venv mismatch ─────────────────────────────────────────────────────
-    console.print(f"\n[bold]2. Python environment[/bold]")
+    console.print("\n[bold]2. Python environment[/bold]")
     python = sys.executable
     console.print(f"  [dim]  Python: {python}[/dim]")
     if binary:
-        binary_venv = Path(binary).parent.parent
-        python_venv = Path(python).parent.parent
+        binary_venv = _launcher_environment(binary)
+        # A uv environment's `bin/python` may itself point to uv's shared managed
+        # interpreter. Resolve the environment directory, not that final symlink.
+        python_venv = Path(python).parent.parent.resolve()
         if binary_venv == python_venv:
-            console.print(f"  [green]✔[/green] Binary and Python are in the same venv")
+            console.print("  [green]✔[/green] Binary and Python are in the same venv")
         else:
-            console.print(f"  [red]✗[/red] Venv mismatch")
+            console.print("  [red]✗[/red] Venv mismatch")
             console.print(f"  [dim]  Binary:  {binary_venv}[/dim]")
             console.print(f"  [dim]  Python:  {python_venv}[/dim]")
-            console.print(f"  [dim]  Fix: re-register after confirming `which sema` is correct[/dim]")
+            console.print("  [dim]  Fix: re-register after confirming `which sema` is correct[/dim]")
             ok = False
 
     # ── 3. Package importable ────────────────────────────────────────────────
-    console.print(f"\n[bold]3. Package[/bold]")
+    console.print("\n[bold]3. Package[/bold]")
     try:
         import sema  # noqa: F401
-        console.print(f"  [green]✔[/green] sema package importable")
+        console.print("  [green]✔[/green] sema package importable")
     except ImportError:
-        console.print(f"  [red]✗[/red] sema package not installed in this venv")
-        console.print(f"  [dim]  Fix: cd /path/to/sema && uv pip install -e '.[dev]'[/dim]")
+        console.print("  [red]✗[/red] sema package not installed in this venv")
+        console.print("  [dim]  Fix: cd /path/to/sema && uv pip install -e '.[dev]'[/dim]")
         ok = False
 
     # ── 4. Claude Code registration ──────────────────────────────────────────
     import re as _re
-    console.print(f"\n[bold]4. Claude Code registration[/bold]")
+    console.print("\n[bold]4. Claude Code registration[/bold]")
     claude_cfg = Path.home() / ".claude.json"
     console.print(f"  [dim]  config: {claude_cfg}[/dim]")
     claude = shutil.which("claude")
@@ -1215,7 +1347,7 @@ def doctor():
         # Check binary exists
         if not Path(reg_binary).exists():
             console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
-            console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+            console.print("  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
             ok = False
         else:
             # Cross-check with `claude mcp list` for live status
@@ -1223,21 +1355,21 @@ def doctor():
                 result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True)
                 mcp_output = result.stdout + result.stderr
                 if "Failed" in mcp_output and "sema" in mcp_output:
-                    console.print(f"  [red]✗[/red] Registered but Claude reports Failed")
-                    console.print(f"  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                    console.print("  [red]✗[/red] Registered but Claude reports Failed")
+                    console.print("  [dim]  Fix: sema init --claude --uninstall && sema init --claude[/dim]")
                     ok = False
                 else:
-                    console.print(f"  [green]✔[/green] Registered and binary exists")
+                    console.print("  [green]✔[/green] Registered and binary exists")
 
             # Check if registered project matches cwd
             if reg_project and Path(reg_project).resolve() != project_root:
-                console.print(f"  [yellow]⚠[/yellow]  Registered project does not match cwd")
+                console.print("  [yellow]⚠[/yellow]  Registered project does not match cwd")
                 console.print(f"  [dim]     registered: {reg_project}[/dim]")
                 console.print(f"  [dim]     cwd:        {project_root}[/dim]")
-                console.print(f"  [dim]     Fix: sema init --claude --uninstall && sema init --claude[/dim]")
+                console.print("  [dim]     Fix: sema init --claude --uninstall && sema init --claude[/dim]")
                 warnings += 1
     else:
-        console.print(f"  [yellow]–[/yellow] sema not registered — run: sema init --claude")
+        console.print("  [yellow]–[/yellow] sema not registered — run: sema init --claude")
         warnings += 1
 
     # Check for stale project-level config (old sema versions wrote here)
@@ -1247,17 +1379,17 @@ def doctor():
             old_data = json.loads(old_config.read_text())
             if "mcpServers" in old_data and "sema" in old_data["mcpServers"]:
                 console.print(f"  [yellow]⚠[/yellow]  Old project-level config found: {old_config}")
-                console.print(f"  [dim]  This can conflict with user-level registration.[/dim]")
+                console.print("  [dim]  This can conflict with user-level registration.[/dim]")
                 console.print(f"  [dim]  Fix: remove the 'sema' key from {old_config}[/dim]")
                 warnings += 1
         except Exception:
             pass
 
     if not claude:
-        console.print(f"  [dim]  (claude CLI not found — live status check skipped)[/dim]")
+        console.print("  [dim]  (claude CLI not found — live status check skipped)[/dim]")
 
     # ── 5. Codex registration ────────────────────────────────────────────────
-    console.print(f"\n[bold]5. Codex registration[/bold]")
+    console.print("\n[bold]5. Codex registration[/bold]")
     codex_config = Path(".codex/config.toml")
     console.print(f"  [dim]  config: {codex_config.resolve()}[/dim]")
     if codex_config.exists():
@@ -1275,55 +1407,62 @@ def doctor():
 
             if reg_binary and not Path(reg_binary).exists():
                 console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
-                console.print(f"  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                console.print("  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
                 ok = False
             else:
-                console.print(f"  [green]✔[/green] Registered and binary exists")
+                console.print("  [green]✔[/green] Registered and binary exists")
 
             if reg_project and Path(reg_project).resolve() != project_root:
-                console.print(f"  [yellow]⚠[/yellow]  Registered project does not match cwd")
+                console.print("  [yellow]⚠[/yellow]  Registered project does not match cwd")
                 console.print(f"  [dim]     registered: {reg_project}[/dim]")
                 console.print(f"  [dim]     cwd:        {project_root}[/dim]")
-                console.print(f"  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
+                console.print("  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
                 warnings += 1
         else:
-            console.print(f"  [yellow]–[/yellow] .codex/config.toml exists but sema not registered")
-            console.print(f"  [dim]  Fix: sema init --codex[/dim]")
+            console.print("  [yellow]–[/yellow] .codex/config.toml exists but sema not registered")
+            console.print("  [dim]  Fix: sema init --codex[/dim]")
             warnings += 1
     else:
-        console.print(f"  [dim]–[/dim] No .codex/config.toml — run sema init --codex if using Codex")
+        console.print("  [dim]–[/dim] No .codex/config.toml — run sema init --codex if using Codex")
 
-    # ── 6. Instruction file ──────────────────────────────────────────────────
-    console.print(f"\n[bold]6. Instruction file (CLAUDE.md / AGENTS.md)[/bold]")
+    # ── 6. Agent guidance ────────────────────────────────────────────────────
+    console.print("\n[bold]6. Agent guidance (skills / instruction files)[/bold]")
     claude_md = Path("CLAUDE.md")
     agents_md = Path("AGENTS.md")
+    skill_files = [
+        Path(".claude/skills/sema-code-navigation/SKILL.md"),
+        Path(".agents/skills/sema-code-navigation/SKILL.md"),
+    ]
     found_any = False
-    for f in [claude_md, agents_md]:
+    found_sema_guidance = False
+    for f in [*skill_files, claude_md, agents_md]:
         if f.exists():
             content = f.read_text()
             if "search_code" in content:
-                console.print(f"  [green]✔[/green] {f} found and mentions search_code")
+                console.print(f"  [green]✔[/green] {f} found and uses sema tools")
+                found_sema_guidance = True
             else:
                 console.print(f"  [yellow]⚠[/yellow]  {f} found but does not mention sema tools")
-                console.print(f"  [dim]  Without search_code instructions the AI may not use sema[/dim]")
-                warnings += 1
             found_any = True
-    if not found_any:
-        console.print(f"  [yellow]⚠[/yellow]  No CLAUDE.md or AGENTS.md in current directory")
-        console.print(f"  [dim]  Without this file the AI may ignore sema and read files directly[/dim]")
+    if not found_sema_guidance:
+        if found_any:
+            console.print("  [yellow]⚠[/yellow]  Existing guidance does not enable sema")
+        else:
+            console.print("  [yellow]⚠[/yellow]  No sema skill, CLAUDE.md, or AGENTS.md found")
+        console.print("  [dim]  Run sema setup to install provider-specific navigation skills[/dim]")
         warnings += 1
 
     # ── 7. Lingering processes ───────────────────────────────────────────────
-    console.print(f"\n[bold]7. Running processes[/bold]")
+    console.print("\n[bold]7. Running processes[/bold]")
     result = subprocess.run(["pgrep", "-f", "sema serve"], capture_output=True, text=True)
     pids = [p.strip() for p in result.stdout.splitlines() if p.strip()]
     if pids:
         console.print(f"  [green]✔[/green] sema serve running (pid {', '.join(pids)})")
     else:
-        console.print(f"  [dim]–[/dim] No sema serve process running (started on demand by AI tool)")
+        console.print("  [dim]–[/dim] No sema serve process running (started on demand by AI tool)")
 
     # ── 8. Index ─────────────────────────────────────────────────────────────
-    console.print(f"\n[bold]8. Index[/bold]")
+    console.print("\n[bold]8. Index[/bold]")
     index_path = Path(".") / DEFAULT_INDEX_DIR
     meta_path = Path(".") / DEFAULT_META_FILE
     if index_path.exists():
@@ -1343,10 +1482,10 @@ def doctor():
                 except Exception:
                     pass
         else:
-            console.print(f"  [green]✔[/green] Index directory exists")
+            console.print("  [green]✔[/green] Index directory exists")
     else:
-        console.print(f"  [yellow]–[/yellow] No index in current directory")
-        console.print(f"  [dim]  Fix: sema index .[/dim]")
+        console.print("  [yellow]–[/yellow] No index in current directory")
+        console.print("  [dim]  Fix: sema index .[/dim]")
         warnings += 1
 
     # ── Summary ───────────────────────────────────────────────────────────────

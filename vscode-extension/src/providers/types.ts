@@ -45,6 +45,8 @@ export interface ModelInfo {
    * model on a provider whose other models have vision).
    */
   accepts?: readonly AttachmentKind[];
+  /** Reasoning levels supported by this model when they differ within a provider. */
+  efforts?: readonly string[];
 }
 
 export interface TokenUsage {

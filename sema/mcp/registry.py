@@ -31,6 +31,20 @@ _SKIP_DIRS = {
 _INDEX_REL = Path(".sema") / "index"
 
 
+def _index_revision(index_path: Path) -> tuple[int, int] | None:
+    """Return the committed index revision without opening Chroma.
+
+    Indexing writes ``.sema/meta.json`` after the store update completes. Long-lived
+    MCP/editor processes can therefore use its stat as a cheap commit marker and
+    discard Chroma/BM25 handles that still point at the previous vector segments.
+    """
+    try:
+        stat = (index_path.parent / "meta.json").stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
 class ProjectResolutionError(Exception):
     """Raised when a tool call cannot be pinned to a single project.
 
@@ -112,6 +126,20 @@ class ProjectHandle:
         self._store: SemaStore | None = None
         self._bm25: BM25Index | None = None
         self._bm25_built = False
+        self._revision = _index_revision(index_path)
+
+    def refresh_if_changed(self) -> bool:
+        """Drop cached readers after another process commits a newer index."""
+        revision = _index_revision(self.index_path)
+        if revision == self._revision:
+            return False
+        if self._store is not None:
+            self._store.close()
+        self._store = None
+        self._bm25 = None
+        self._bm25_built = False
+        self._revision = revision
+        return True
 
     @property
     def store(self) -> SemaStore:
@@ -190,9 +218,12 @@ class ProjectRegistry:
             handle = self._handles.get(name)
             if handle is None:
                 raise ProjectResolutionError(self._unknown_msg(name))
+            handle.refresh_if_changed()
             return handle
         if len(self._handles) == 1:
-            return next(iter(self._handles.values()))
+            handle = next(iter(self._handles.values()))
+            handle.refresh_if_changed()
+            return handle
         if not self._handles:
             raise ProjectResolutionError(
                 "No indexed projects are available. Run `sema index .` in a project first."

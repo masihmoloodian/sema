@@ -1,6 +1,5 @@
 """Tests for the chunker orchestration layer."""
 
-import pytest
 import shutil
 from pathlib import Path
 from sema.store.chroma import SemaStore
@@ -85,8 +84,6 @@ def test_incremental_reset_clears_hashes(tmp_path):
     embedder = Embedder()
 
     index_project(FIXTURE_REPO, store, embedder)
-    # Confirm hashes exist
-    hash_store = FileHashStore(tmp_path / "idx" / ".." )
     # After reset, all files should be re-indexed (skipped == 0)
     stats = index_project(FIXTURE_REPO, store, embedder, reset=True)
     assert stats["skipped"] == 0
@@ -105,7 +102,7 @@ def test_incremental_removes_stale_hashes_for_deleted_files(tmp_path):
     deleted = repo / "src" / "auth" / "middleware.ts"
     deleted.unlink()
 
-    stats = index_project(repo, store, embedder)
+    index_project(repo, store, embedder)
     # The deleted file should not be in the index
     results = store.get_by_name("requireAuth")
     assert results == []

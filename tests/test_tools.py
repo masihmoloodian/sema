@@ -49,6 +49,11 @@ def test_search_top_k_capped_at_10():
     assert "results" in result
 
 
+def test_search_top_k_clamped_to_one():
+    result = search_code("auth", top_k=0)
+    assert result.count("::") == 1
+
+
 def test_get_code_returns_full_body():
     result = get_code("validateToken")
     assert "validateToken" in result
@@ -82,6 +87,12 @@ def test_repo_map_no_full_source():
     result = repo_map()
     # repo_map should not contain full function bodies
     assert "if err := json.NewDecoder" not in result
+
+
+def test_repo_map_omits_document_and_config_chunks():
+    result = repo_map()
+    assert "README.md" not in result
+    assert "config.json" not in result
 
 
 def test_find_usages_returns_results():

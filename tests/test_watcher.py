@@ -1,7 +1,6 @@
 """Tests for incremental indexing (index_file) and the watcher handler."""
 
 import time
-from pathlib import Path
 import pytest
 
 from sema.indexer.chunker import index_file

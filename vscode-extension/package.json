@@ -2,7 +2,7 @@
   "name": "sema-codebase-chat",
   "displayName": "sema — semantic code search & chat",
   "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude, OpenAI, DeepSeek, OpenRouter), powered by the local sema index.",
-  "version": "0.3.0",
+  "version": "0.3.3",
   "publisher": "MasihMoloodian",
   "license": "MIT",
   "icon": "media/icon-128.png",
@@ -20,8 +20,7 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onView:semaChat",
-    "onView:semaManage"
+    "onView:semaChat"
   ],
   "contributes": {
     "viewsContainers": {
@@ -39,12 +38,6 @@
           "type": "webview",
           "id": "semaChat",
           "name": "Chat",
-          "icon": "media/icon.svg",
-          "contextualTitle": "sema"
-        },
-        {
-          "id": "semaManage",
-          "name": "Manage",
           "icon": "media/icon.svg",
           "contextualTitle": "sema"
         }
@@ -77,6 +70,11 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "sema.manage.open",
+        "title": "sema: Manage",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "sema.manage.reindex",
         "title": "sema: Re-index",
         "icon": "$(database)"
@@ -100,6 +98,11 @@
         "command": "sema.manage.refresh",
         "title": "sema: Refresh status",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "sema.manage.updateAgents",
+        "title": "sema: Update agent CLIs",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -112,24 +115,19 @@
       ],
       "view/title": [
         {
-          "command": "sema.chat.setKey",
+          "command": "sema.manage.open",
           "when": "view == semaChat",
           "group": "navigation@1"
+        },
+        {
+          "command": "sema.chat.setKey",
+          "when": "view == semaChat",
+          "group": "navigation@2"
         },
         {
           "command": "sema.chat.clear",
           "when": "view == semaChat",
-          "group": "navigation@2"
-        },
-        {
-          "command": "sema.manage.reindex",
-          "when": "view == semaManage",
-          "group": "navigation@1"
-        },
-        {
-          "command": "sema.manage.refresh",
-          "when": "view == semaManage",
-          "group": "navigation@2"
+          "group": "navigation@3"
         }
       ]
     },
@@ -174,7 +172,7 @@
     "bundle": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "compile": "tsc -p ./",
-    "test": "esbuild src/*.test.ts --bundle --platform=node --format=cjs --outdir=out/test --external:vscode && node --test \"out/test/*.test.js\"",
+    "test": "esbuild src/*.test.ts src/providers/*.test.ts --bundle --platform=node --format=cjs --outdir=out/test --external:vscode && node --test out/test/*.test.js out/test/providers/*.test.js",
     "package": "vsce package"
   },
   "devDependencies": {

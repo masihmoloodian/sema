@@ -98,6 +98,21 @@ def test_registry_lazy_store_built_once(multi_root, embedder):
     assert s1 is s2                       # cached
 
 
+def test_registry_reloads_cached_readers_after_index_commit(multi_root, embedder):
+    reg = ProjectRegistry.from_roots([multi_root], embedder)
+    handle = reg.resolve("proj-a")
+    old_store = handle.store
+    old_bm25 = handle.bm25
+
+    meta = handle.index_path.parent / "meta.json"
+    meta.write_text('{"indexed_at":"new revision with a different size"}')
+
+    refreshed = reg.resolve("proj-a")
+    assert refreshed is handle
+    assert refreshed.store is not old_store
+    assert refreshed.bm25 is not old_bm25
+
+
 # ── tools via registry ───────────────────────────────────────────────────────
 
 def test_list_projects_multi(multi_root, embedder):

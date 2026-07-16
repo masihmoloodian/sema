@@ -291,13 +291,12 @@ export class ClaudeCodeProvider extends CliProvider {
   // Invocation values are the CLI aliases (always resolve to the latest of each tier),
   // with the current version shown as the display name. `claude --model` accepts these.
   readonly modelInfos: ModelInfo[] = [
-    { id: 'default', name: 'Default', description: 'Recommended by Claude Code', recommended: true },
     { id: 'opus', alias: 'opus', name: 'Opus 4.8' },
     { id: 'fable', alias: 'fable', name: 'Fable 5' },
-    { id: 'sonnet', alias: 'sonnet', name: 'Sonnet 5' },
+    { id: 'sonnet', alias: 'sonnet', name: 'Sonnet 5', recommended: true },
     { id: 'haiku', alias: 'haiku', name: 'Haiku 4.5' },
   ];
-  readonly defaultModel = 'default';
+  readonly defaultModel = 'sonnet';
   // Mirrors `claude --help`: "--effort <level>  Effort level for the current session
   // (low, medium, high, xhigh, max)". 'max' is Claude-only — Codex rejects it.
   // 'default' means pass no --effort and let the CLI decide.
@@ -328,8 +327,15 @@ export class ClaudeCodeProvider extends CliProvider {
       // Plan mode: explore read-only and present a plan; edits are blocked.
       args.push('--permission-mode', 'plan');
     } else if (opts.agent) {
-      // Let it edit files; read-only otherwise (edits are denied non-interactively).
-      args.push('--permission-mode', 'acceptEdits');
+      // Agent mode is explicitly full-capability, matching API providers' edit_file
+      // + run_command toolset. acceptEdits handles files; preapproving Bash lets a
+      // headless run build/test without using bypassPermissions. Put another flag
+      // after the variadic --allowedTools so it cannot swallow the prompt.
+      args.push('--allowedTools', 'Bash', '--permission-mode', 'acceptEdits');
+    } else {
+      // Ask is conversational, not an agent run. An empty allow-list prevents Claude
+      // Code from inspecting the workspace despite being an agentic CLI internally.
+      args.push('--tools', '');
     }
     if (opts.model && opts.model !== 'default') {
       args.push('--model', opts.model);
@@ -436,38 +442,24 @@ export class ClaudeCodeProvider extends CliProvider {
 export class CodexProvider extends CliProvider {
   readonly id = 'codex';
   readonly label = 'Codex (local)';
-  // Models per `codex debug models` (Codex CLI 0.133): gpt-5.5 / gpt-5.4 / gpt-5.4-mini.
-  // (gpt-5.6-sol/terra/luna are OpenAI API models — they belong to the `openai` provider,
-  // not the Codex CLI.) 'default' lets Codex pick its own configured model.
-  // Slugs per `codex debug models` (gpt-5.5 / gpt-5.4 / gpt-5.4-mini; codex-auto-review
-  // is an internal review model and is deliberately not offered).
-  //
-  // 'Default' passes no -m and lets Codex choose — which it does server-side, so it can
-  // resolve to a model this CLI doesn't know (currently gpt-5.6-terra, which needs a
-  // newer Codex). Pick an explicit model to pin it.
+  // Models and reasoning levels reported by `codex debug models` in CLI 0.144.5.
+  // codex-auto-review is an internal review model and is deliberately not offered.
   readonly modelInfos: ModelInfo[] = [
-    {
-      id: 'default',
-      name: 'Default',
-      description: "Chosen by Codex server-side; may be newer than your CLI. Pick a model to pin it.",
-      recommended: true,
-    },
-    { id: 'gpt-5.5', name: 'GPT-5.5' },
-    { id: 'gpt-5.4', name: 'GPT-5.4' },
-    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+    { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', recommended: true,
+      efforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+    { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra',
+      efforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+    { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna',
+      efforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    { id: 'gpt-5.5', name: 'GPT-5.5', efforts: ['default', 'low', 'medium', 'high', 'xhigh'] },
+    { id: 'gpt-5.4', name: 'GPT-5.4', efforts: ['default', 'low', 'medium', 'high', 'xhigh'] },
+    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', efforts: ['default', 'low', 'medium', 'high', 'xhigh'] },
   ];
-  readonly defaultModel = 'default';
+  readonly defaultModel = 'gpt-5.6-sol';
   // Codex has no --effort flag; effort is config, passed as
   // `-c model_reasoning_effort=<level>`. Parsing locally is not enough to qualify a
-  // level, so each of these was run end-to-end against gpt-5.5:
-  //   none/low/medium/high/xhigh -> answer returned
-  //   minimal                    -> HTTP 400 "The following tools cannot be used with
-  //                                 reasoning.effort 'minimal': image_gen, web_search"
-  // So 'minimal' is omitted: the CLI's parser accepts it, but it is incompatible with
-  // the tools Codex enables, making it a guaranteed failure here. 'none' is kept — it
-  // works, despite `codex debug models` advertising only low/medium/high/xhigh.
-  // Claude Code's 'max' is absent because Codex's parser rejects it outright.
-  readonly efforts = ['default', 'none', 'low', 'medium', 'high', 'xhigh'];
+  // Provider-wide union for custom ids; curated models narrow this via ModelInfo.efforts.
+  readonly efforts = ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   readonly auth = { login: ['login'], logout: ['logout'], status: ['login', 'status'] };
 
   /** `codex exec` attaches images only (`-i`); its Read tool is text. No PDF path. */
@@ -690,13 +682,11 @@ export class OpenCodeProvider extends CliProvider {
   readonly id = 'opencode';
   readonly label = 'Open Code (local)';
   // Curated subset of `opencode models` (the opencode/ catalog has ~55); "+ custom id…"
-  // reaches the rest. 'default' lets opencode use its own configured model.
-  // `accepts` marks what each model can actually read; entries without one fall back to
-  // image+text. 'default' is text-only — see accepts() below.
+  // reaches the rest. `accepts` marks what each model can actually read; entries without
+  // one fall back to image+text.
   readonly modelInfos: ModelInfo[] = [
-    { id: 'default', name: 'Default', recommended: true, accepts: ['text'] },
     { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8', accepts: ['image', 'pdf', 'text'] },
-    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5', accepts: ['image', 'pdf', 'text'] },
+    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5', recommended: true, accepts: ['image', 'pdf', 'text'] },
     { id: 'opencode/claude-fable-5', name: 'Claude Fable 5', accepts: ['image', 'pdf', 'text'] },
     { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5', accepts: ['image', 'pdf', 'text'] },
     { id: 'opencode/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
@@ -712,7 +702,7 @@ export class OpenCodeProvider extends CliProvider {
     { id: 'opencode/grok-4.5', name: 'Grok 4.5' },
     { id: 'opencode/minimax-m3', name: 'MiniMax M3', accepts: ['text'] },
   ];
-  readonly defaultModel = 'default';
+  readonly defaultModel = 'opencode/claude-sonnet-5';
   // No `efforts`: `opencode run` exposes no reasoning-effort argument.
   readonly modelHint =
     'provider/model — run `opencode models` (e.g. anthropic/claude-sonnet-4-6, openai/gpt-5, opencode/gpt-5.1-codex)';
@@ -723,11 +713,6 @@ export class OpenCodeProvider extends CliProvider {
    * per-model — opencode is a gateway to ~55 of them, like OpenRouter and Together.
    * Claiming vision for all of them means a silent "I cannot view images" reply from a
    * text-only model instead of an up-front explanation.
-   *
-   * 'default' is treated as text-only on purpose: opencode resolves it from its own
-   * config (commonly a free, text-only model such as opencode/big-pickle) and reports
-   * no model id in its JSON stream, so there is nothing to inspect at runtime. Picking
-   * an explicit model from the dropdown is what unlocks images.
    */
   accepts(model: string): readonly AttachmentKind[] {
     return this.modelInfos.find((m) => m.id === model)?.accepts ?? ['image', 'text'];

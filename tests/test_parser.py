@@ -1,6 +1,5 @@
 """Tests for language parsers."""
 
-import pytest
 from pathlib import Path
 from sema.indexer.parser import parse_file, register, get_supported_extensions
 

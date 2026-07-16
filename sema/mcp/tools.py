@@ -139,7 +139,7 @@ def search_code(query: str, top_k: int = 5, project: str | None = None) -> str:
     store = proj.store
     embedder = _require_registry().embedder
 
-    top_k = min(top_k, 10)
+    top_k = max(1, min(top_k, 10))
     fetch_k = min(top_k * 3, 30)  # over-fetch from each source before merging
 
     embedding = embedder.embed_one(query)

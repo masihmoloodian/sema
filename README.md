@@ -43,6 +43,18 @@ sema index .     # build the local semantic index
 sema setup       # register with every detected CLI: Claude Code, Codex, opencode
 ```
 
+Keep the local coding-agent CLIs current so newly released models and effort
+levels are available:
+
+```bash
+sema update --check              # show installed Claude/Codex/opencode versions
+sema update                      # run every installed agent's official updater
+sema update --provider codex     # update one agent only (repeatable)
+```
+
+The extension exposes the same workflow under **Manage → Update agent CLIs…**.
+Reload VS Code after an update so its model picker reflects the installed CLI.
+
 Want **just the extension** or **just the index**? Both work standalone. Plus manual installs, requirements, and troubleshooting — **for more details see the [Installation guide](docs/installation.md)**.
 
 📦 **[sema-mcp on PyPI](https://pypi.org/project/sema-mcp/)** · 🧩 **[Extension on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)**

@@ -5,8 +5,15 @@ Lazy model loading — model downloads only on first index, not on MCP serve.
 Batch embedding for efficiency. Model cached in ~/.cache/sema/models/.
 """
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+# huggingface-hub 1.23+ otherwise fetches its agent-harness registry while
+# constructing request headers, including on a local-files-only model load. sema
+# never sends telemetry, and disabling it still permits the intentional first-use
+# model download when the local cache is empty.
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
@@ -23,10 +30,22 @@ class Embedder:
     def _load(self) -> "SentenceTransformer":
         if self._model is None:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(
-                MODEL_NAME,
-                cache_folder=str(CACHE_DIR),
-            )
+            # Prefer the local cache.  sentence-transformers otherwise performs a
+            # series of Hugging Face metadata requests even when every model file is
+            # already present; that made a fresh `sema search` process spend seconds
+            # on the network and weakened offline operation.  Only fall back to the
+            # normal download path on the first-ever use of the model.
+            try:
+                self._model = SentenceTransformer(
+                    MODEL_NAME,
+                    cache_folder=str(CACHE_DIR),
+                    local_files_only=True,
+                )
+            except (OSError, ValueError):
+                self._model = SentenceTransformer(
+                    MODEL_NAME,
+                    cache_folder=str(CACHE_DIR),
+                )
         return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:

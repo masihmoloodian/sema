@@ -1,0 +1,5 @@
+{
+  "name": "sema-agent-task-fixture",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}

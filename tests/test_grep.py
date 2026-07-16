@@ -1,7 +1,6 @@
 """Tests for grep_symbol, grep_symbol_dynamic, and is_definition_line."""
 
 import pytest
-from pathlib import Path
 from sema.utils.grep import grep_symbol, grep_symbol_dynamic, is_definition_line
 
 

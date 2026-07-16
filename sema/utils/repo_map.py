@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 
+CODE_CHUNK_TYPES = {"function", "class", "method", "interface", "struct", "module"}
+
 
 def generate_repo_map(all_metadata: list[dict]) -> str:
     """
@@ -14,7 +16,14 @@ def generate_repo_map(all_metadata: list[dict]) -> str:
     # Group chunks by file
     by_file: dict[str, list[dict]] = defaultdict(list)
     for m in all_metadata:
-        by_file[m["file"]].append(m)
+        # Documentation sections and config blobs are useful when explicitly
+        # searched, but including every one in the architecture map produces a
+        # large, noisy response. repo_map is intentionally code-shaped.
+        if m.get("chunk_type") in CODE_CHUNK_TYPES:
+            by_file[m["file"]].append(m)
+
+    if not by_file:
+        return "No code symbols are indexed. Run: sema index ."
 
     lines = ["# Repository Map\n"]
 

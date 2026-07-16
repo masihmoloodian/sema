@@ -1,13 +1,15 @@
 """Walk project directory, respecting .gitignore and common excludes."""
 
+import os
 from pathlib import Path
 from typing import Iterator
 from .gitignore import load_gitignore, is_ignored
 
 ALWAYS_EXCLUDE_DIRS = {
     ".git", ".sema", "node_modules", "__pycache__", ".venv", "venv",
-    "env", "dist", "build", "coverage", ".mypy_cache", ".pytest_cache",
-    ".ruff_cache", "vendor", "third_party",
+    "env", "dist", "build", "out", "coverage", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache", "vendor", "third_party", ".claude", ".agents", ".codex",
+    ".opencode", ".next", ".nuxt", ".turbo", "target", ".gradle",
 }
 
 ALWAYS_EXCLUDE_SUFFIX_PATTERNS = {
@@ -34,31 +36,46 @@ def walk_project(project_root: Path) -> Iterator[Path]:
     supported_names = get_supported_filenames()
     spec = load_gitignore(project_root)
 
-    for path in sorted(project_root.rglob("*")):
-        if not path.is_file():
-            continue
-
-        # Skip excluded directories
-        parts = set(path.relative_to(project_root).parts[:-1])
-        if parts & ALWAYS_EXCLUDE_DIRS:
-            continue
-
-        # Skip lock / generated files
-        if path.name.lower() in ALWAYS_EXCLUDE_FILES:
-            continue
-
-        # Check extension or exact filename against the parser registry
-        suffix = path.suffix.lower()
-        name = path.name.lower()
-        if suffix not in supported_exts and name not in supported_names:
-            continue
-
-        # Skip minified / declaration files
-        if any(path.name.endswith(p) for p in ALWAYS_EXCLUDE_SUFFIX_PATTERNS):
-            continue
-
-        # Skip .gitignore-matched files
+    def ignored_dir(path: Path) -> bool:
+        if path.name in ALWAYS_EXCLUDE_DIRS:
+            return True
         if is_ignored(path, project_root, spec):
-            continue
+            return True
+        if spec is None:
+            return False
+        # Directory-only gitignore patterns commonly need the trailing slash.
+        relative = path.relative_to(project_root).as_posix().rstrip("/") + "/"
+        return spec.match_file(relative)
 
-        yield path
+    # os.walk(topdown=True) lets us prune excluded directories before visiting
+    # their contents. Path.rglob() filtered them only after descending into them,
+    # which made discovery scale with node_modules/vendor rather than source files.
+    for dirpath, dirnames, filenames in os.walk(project_root, topdown=True):
+        current = Path(dirpath)
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not ignored_dir(current / name)
+        )
+
+        for filename in sorted(filenames):
+            path = current / filename
+
+            # Skip lock / generated files
+            if path.name.lower() in ALWAYS_EXCLUDE_FILES:
+                continue
+
+            # Check extension or exact filename against the parser registry
+            suffix = path.suffix.lower()
+            name = path.name.lower()
+            if suffix not in supported_exts and name not in supported_names:
+                continue
+
+            # Skip minified / declaration files
+            if any(path.name.endswith(p) for p in ALWAYS_EXCLUDE_SUFFIX_PATTERNS):
+                continue
+
+            # Skip .gitignore-matched files
+            if is_ignored(path, project_root, spec):
+                continue
+
+            yield path

@@ -90,6 +90,9 @@ def test_setup_registers_opencode_when_detected(tmp_path, monkeypatch):
     cfg = tmp_path / "opencode.json"
     assert cfg.exists()
     assert json.loads(cfg.read_text())["mcp"]["sema"]["enabled"] is True
+    skill = tmp_path / ".agents" / "skills" / "sema-code-navigation" / "SKILL.md"
+    assert skill.exists()
+    assert "search_code" in skill.read_text()
 
 
 def test_setup_env_var_skip(tmp_path, monkeypatch):

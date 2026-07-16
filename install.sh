@@ -87,9 +87,13 @@ info "installing $SEMA_PACKAGE"
 uv tool install --upgrade --force "$SEMA_PACKAGE"
 # Make sure uv's tool bin dir is on PATH for the rest of this script.
 uv tool update-shell >/dev/null 2>&1 || true
-for d in "$HOME/.local/bin" "$(uv tool dir 2>/dev/null)/../bin"; do
-  [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
-done
+# Prepend it even when it already appears later in PATH. A project virtualenv may
+# otherwise shadow the binary we just installed, causing setup to register an old
+# checkout instead of this fresh uv tool.
+tool_bin=$(uv tool dir --bin 2>/dev/null || printf '%s' "$(uv tool dir 2>/dev/null)/../bin")
+if [ -n "$tool_bin" ] && [ -d "$tool_bin" ]; then
+  PATH="$tool_bin:$PATH"
+fi
 export PATH
 
 if have sema; then

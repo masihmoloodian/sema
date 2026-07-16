@@ -47,6 +47,13 @@ const DEFS: Record<string, ToolDef> = {
     { symbol: str('The symbol name to fetch.') },
     ['symbol'],
   ),
+  check_reuse: fn(
+    'check_reuse',
+    'Ask sema whether functionality already exists before adding a new helper, class, function, ' +
+      'or utility. Returns a reuse verdict and matching candidates.',
+    { description: str('A natural-language description of the functionality you plan to add.') },
+    ['description'],
+  ),
   grep: fn(
     'grep',
     'Search file contents by regular expression across the workspace (skips node_modules, .git, ' +
@@ -121,6 +128,7 @@ const DEFS: Record<string, ToolDef> = {
 export const AGENT_TOOLS: ToolDef[] = [
   'search_code',
   'get_code',
+  'check_reuse',
   'grep',
   'glob',
   'list_directory',
@@ -135,6 +143,7 @@ export const AGENT_TOOLS: ToolDef[] = [
 export const READONLY_TOOLS: ToolDef[] = [
   'search_code',
   'get_code',
+  'check_reuse',
   'grep',
   'glob',
   'list_directory',
@@ -259,6 +268,8 @@ export function toolDetail(name: string, args: Record<string, unknown>): string 
       return String(args.query ?? '');
     case 'get_code':
       return String(args.symbol ?? '');
+    case 'check_reuse':
+      return String(args.description ?? '');
     default:
       return String(args.path ?? '');
   }
@@ -452,6 +463,17 @@ export async function executeTool(
           .map((i) => `// ${i.file}:${i.start_line}-${i.end_line}\n${i.body}`)
           .join('\n\n')
           .slice(0, MAX_RESULT);
+      }
+      case 'check_reuse': {
+        if (!ctx.semaBin) {
+          return 'check_reuse unavailable: no sema binary configured. Use search_code instead.';
+        }
+        const { stdout } = await semaJson(ctx, [
+          'reuse',
+          String(args.description ?? ''),
+          '--json',
+        ]);
+        return stdout.trim().slice(0, MAX_RESULT);
       }
       case 'run_command': {
         const command = String(args.command ?? '');

@@ -76,10 +76,14 @@ Setup guides: [Claude Code](../docs/claude-code.md) · [Codex](../docs/codex.md)
 
 ### 5 · Chat
 
-Open the **Chat** view, pick a provider, model, and mode — **Ask** (read-only),
-**Plan** (propose a plan), or **Agent** (make changes) — and type. Toggle
-**index** on to feed semantic context to API providers, **redact** on to strip
-PII before anything is sent. Attach a screenshot, PDF, or file with **📎**.
+Open the **Chat** view, pick a provider, model, and mode — **Ask** (simple chat),
+**Plan** (read-only investigation that saves a Markdown plan), or **Agent**
+(make and verify changes) — and type. Plan artifacts live under
+`.sema/plans/`; switching to Agent in the same chat gives the agent the latest
+plan automatically. Plan and Agent always use the sema index when it is
+available. Toggle **index** on to add semantic context in Ask mode too, and
+toggle **redact** on to strip PII before anything is sent. Attach a screenshot,
+PDF, or file with **📎**.
 
 Then try switching provider mid-thread: plan it with Claude Code, hand the same
 conversation to Codex to build, review the diff with a cheap OpenRouter model.
@@ -95,28 +99,32 @@ so the agent greps and reads files like any other assistant.
 
 - **One conversation, eight engines** — provider and model pickers stay live
   between turns. Local CLI providers stream thinking and tool activity like their
-  terminal apps do, and keep **per-session memory**. A **Log in** button signs you
+  terminal apps do, and keep **per-session memory**. Changing provider, model, or
+  mode starts a compatible native CLI session while the extension preserves and
+  replays the full visible conversation, so one chat can safely mix models. A
+  **Log in** button signs you
   into Claude Code / Codex from the panel; if a message fails because you're not
   signed in, a one-click **Log in** prompt appears. Each chat is one session;
   **New chat** starts fresh.
-- **Ask · Plan · Agent** — **Ask** for read-only Q&A, **Plan** to investigate with
-  read-only tools and propose a step-by-step plan, **Agent** to carry it out. In
+- **Ask · Plan · Agent** — **Ask** is ordinary chat with no workspace tools,
+  **Plan** investigates with read-only tools and writes only its durable Markdown
+  plan, and **Agent** reads that plan and carries it out. In
   Agent mode the model gets a full toolset — `search_code`, `get_code`, `grep`,
   `glob`, `read_file`, `write_file`, surgical `edit_file`, `delete_file`,
   `run_command` — so **even API models read, edit, and run commands**, not just the
-  local CLIs. Paths stay inside the workspace; Plan mode refuses to write.
+  local CLIs. Paths stay inside the workspace. If no sema index exists, Agent
+  falls back to workspace search/read tools instead of failing.
 - **Index-aware** — the agent searches your sema index directly, finding the right
   function by meaning instead of grepping its way there. The **index** toggle also
   injects retrieved code as RAG context — useful for API providers, which can't
   read files themselves.
-- **Reasoning effort** — shown only for the two providers whose CLI takes one, with
-  each list carrying only levels verified to run. **Claude Code** (`--effort`):
-  low / medium / high / extra high / **max**. **Codex**
-  (`-c model_reasoning_effort=`): **none** / low / medium / high / extra high. The
-  sets genuinely differ — Codex errors on Claude's `max`, Claude ignores Codex's
-  `none` — so the picker only offers what the selected CLI accepts, and `default`
-  sends no flag. Every other provider hides it: effort is a CLI feature, not an API
-  parameter.
+- **Reasoning effort** — shown only for the two local CLIs that expose it, and
+  filtered for the selected model. **Claude Code** (`--effort`) offers default,
+  low, medium, high, extra high, and max. **Codex**
+  (`-c model_reasoning_effort=`) offers default through extra high on GPT-5.4,
+  GPT-5.4 Mini, and GPT-5.5; adds max on GPT-5.6 Luna; and adds max plus ultra on
+  GPT-5.6 Sol and Terra. `default` sends no override. API providers and opencode
+  hide the control because their CLIs do not expose this same effort contract.
 - **Attachments** — images, PDFs, and text files to any provider, each in its native
   form: Anthropic and OpenAI as content blocks, the local CLIs as real files on disk
   (`codex -i`, `opencode -f`, Claude Code's Read tool). Text is inlined, so it works
@@ -148,12 +156,33 @@ so the agent greps and reads files like any other assistant.
 - **Manage** — index status, chunk/file counts, model, last-updated time, index
   path, the sema binary in use, CLI registration, a file **watch** toggle, and the
   session's **token usage and estimated cost**. One-click: Re-index, Re-index
-  (reset), register/unregister, watch, doctor.
+  (reset), register/unregister, watch, doctor, and **Update agent CLIs**.
 - **Search** (`sema: Search code`) — semantic search; click a result to jump to the
   definition.
 - **Reuse** (`sema: Check reuse`) — describe what you're about to build; sema says
   whether it already exists and lists candidates.
 - **Status bar** — index freshness (chunks / files / age); warns when stale.
+  It refreshes after saves and indexing, when VS Code regains focus, and every 30
+  seconds, so an external `sema index .` run cannot leave a cached stale label.
+
+## Keep agent CLIs current
+
+New model ids and effort levels often require a newer local CLI. Use
+**Manage → Update agent CLIs…** to update all installed agents or choose one.
+The action opens an integrated terminal so you can see the official updater's
+output and any authentication prompt. The equivalent commands are:
+
+```bash
+sema update --check
+sema update
+sema update --provider claude
+sema update --provider codex
+sema update --provider opencode
+```
+
+Under the hood these invoke `claude update`, `codex update`, and
+`opencode upgrade`; existing authentication and configuration remain owned by
+those CLIs. Restart active agent sessions and reload VS Code when they finish.
 
 ## Configuration
 
@@ -164,6 +193,7 @@ so the agent greps and reads files like any other assistant.
 | `sema.chat.maxTokens` | `8192` | Max tokens for a chat completion response (API providers). |
 | `sema.chat.claudePath` | `claude` | Path to the Claude Code CLI. Absolute path if `claude` isn't on VS Code's PATH. |
 | `sema.chat.codexPath` | `codex` | Path to the Codex CLI. Absolute path if `codex` isn't on VS Code's PATH. |
+| `sema.chat.opencodePath` | `opencode` | Path to the opencode CLI. Absolute path if `opencode` isn't on VS Code's PATH. |
 
 ## Using the index without the extension
 

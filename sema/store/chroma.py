@@ -106,6 +106,7 @@ class SemaStore:
         chunk_types: list[str] | None = None,
     ) -> list[dict]:
         """Semantic search. Returns search results with signatures only."""
+        top_k = max(1, top_k)
         where: dict = {}
         if language:
             where["language"] = language
@@ -241,6 +242,10 @@ class SemaStore:
             name=self.COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
+
+    def close(self) -> None:
+        """Release this embedded Chroma client and its cached segment readers."""
+        self.client.close()
 
     def count(self) -> int:
         return self.collection.count()
