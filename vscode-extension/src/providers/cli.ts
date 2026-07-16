@@ -909,7 +909,7 @@ export class CodexProvider extends CliProvider {
 
     try {
       await request('initialize', {
-        clientInfo: { name: 'sema_vscode', title: 'sema VS Code Extension', version: '0.4.0' },
+        clientInfo: { name: 'sema_vscode', title: 'sema VS Code Extension', version: '0.4.1' },
       });
       send({ method: 'initialized', params: {} });
       const effort = opts.effort && opts.effort !== 'default' ? opts.effort : undefined;

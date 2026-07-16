@@ -33,6 +33,16 @@ try {
 const ChatViewProvider = compiled.exports.ChatViewProvider;
 if (!ChatViewProvider) throw new Error('could not load ChatViewProvider for webview validation');
 const html = ChatViewProvider.prototype.getHtml.call({});
+for (const id of ['plusbtn', 'semabtn', 'modepill', 'permissionpill', 'modelpill']) {
+  if (!html.includes(`id="${id}"`)) throw new Error(`composer is missing the ${id} control`);
+}
+if (html.includes('id="gearbtn"')) throw new Error('legacy overloaded gear control is still present');
+if (!html.includes("plusBtn.addEventListener('click', function(){ vscode.postMessage({type:'attach'}); });")) {
+  throw new Error('attachment button is not a direct file attachment action');
+}
+if (!html.includes("showMenu(semaBtn, 'left'") || !html.includes("showMenu(permissionPill, 'right'")) {
+  throw new Error('dedicated Sema or permission menu is missing');
+}
 const match = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html);
 if (!match) throw new Error('could not find the chat webview script');
 

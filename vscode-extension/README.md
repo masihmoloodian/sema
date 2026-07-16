@@ -120,15 +120,18 @@ so the agent greps and reads files like any other assistant.
   injects retrieved code as RAG context — useful for API providers, which can't
   read files themselves. The toggle is authoritative in every mode: when it is off,
   chat does not refresh, search, or inject the Sema index.
-- **Reasoning effort** — shown only for the two local CLIs that expose it, and
-  filtered for the selected model. **Claude Code** (`--effort`) offers default,
-  low, medium, high, extra high, and max. **Codex**
-  (`-c model_reasoning_effort=`) offers default through extra high on GPT-5.4,
-  GPT-5.4 Mini, and GPT-5.5; adds max on GPT-5.6 Luna; and adds max plus ultra on
-  GPT-5.6 Sol and Terra. `default` sends no override. API providers and opencode
-  hide the control because their CLIs do not expose this same effort contract.
-- **Agent permissions** — in **Agent** mode with Claude Code or Codex, open the
-  gear menu and choose **Require approval** (the default) or **Bypass permissions**.
+- **Reasoning effort** — shown only for the two local CLIs that expose it. The
+  extension reads the configured executables at runtime: `claude --help` supplies
+  Claude Code's levels, while `codex debug models` supplies Codex's model-specific
+  levels. Current Claude Code offers default, low, medium, high, extra high, and
+  max. Current Codex offers default through extra high on GPT-5.4, GPT-5.4 Mini,
+  and GPT-5.5; adds max on GPT-5.6 Luna; and adds max plus ultra on GPT-5.6 Sol
+  and Terra. Older Codex builds safely fall back to default, minimal, low, medium,
+  and high. `default` sends no override. API providers and opencode hide the
+  control because their CLIs do not expose this same effort contract.
+- **Agent permissions** — in **Agent** mode with Claude Code or Codex, use the
+  dedicated shield control and choose **Require approval** (the default) or
+  **Bypass permissions**.
   When bypass is active, the composer bar shows a persistent orange **Full access**
   indicator.
   Require approval pauses protected file changes, commands, or access escalation
@@ -181,9 +184,9 @@ so the agent greps and reads files like any other assistant.
 
 ## Keep agent CLIs current
 
-New model ids and effort levels often require a newer local CLI. Open the chat
-gear and choose **Update agent CLIs…** (or **Manage sema…**) to update all installed
-agents or choose one.
+New model ids and effort levels often require a newer local CLI. Open the chat's
+**Sema** menu and choose **Update agent CLIs…** (or **Manage sema…**) to update all
+installed agents or choose one.
 The action opens an integrated terminal so you can see the official updater's
 output and any authentication prompt. The equivalent commands are:
 
