@@ -16,10 +16,10 @@ cd your-project
 sema init --claude
 ```
 
-`sema init --claude` calls `claude mcp add sema -s user` internally. If the `claude` binary is not found, it will print the exact command to run manually:
+`sema init --claude` calls `claude mcp add sema -s user` internally, registering the absolute path that `which sema` resolves to. If the `claude` binary is not found, it will print the exact command to run manually:
 
 ```bash
-claude mcp add sema -s user -- /path/to/.venv/bin/sema serve --project /path/to/project
+claude mcp add sema -s user -- "$(which sema)" serve --project /path/to/project
 ```
 
 For Codex, check `.codex/config.toml` in your project:
@@ -40,7 +40,7 @@ Then type `/mcp` in chat. You should see `sema` listed as connected/enabled.
 **Step 3 — Verify the MCP server starts**
 
 ```bash
-/path/to/.venv/bin/sema serve --project /path/to/your-project
+sema serve --project /path/to/your-project
 ```
 
 This should block silently (no output). If it crashes with an error, that's the root cause — fix it, then re-run `sema init`.
@@ -115,12 +115,12 @@ For Claude Code, check:
 cat your-project/CLAUDE.md
 ```
 
-For Codex, check:
+For Codex or opencode (both read `AGENTS.md`), check:
 ```bash
 cat your-project/AGENTS.md
 ```
 
-If missing or not mentioning sema, add the template. See [Claude Code setup](claude-code.md) and [OpenAI Codex setup](codex.md) for templates.
+If missing or not mentioning sema, add the template. See [Claude Code setup](claude-code.md), [OpenAI Codex setup](codex.md), and [opencode setup](opencode.md) for templates.
 
 > **Workspace note:** `CLAUDE.md` must be in each project's git root folder. A `CLAUDE.md` at the workspace parent directory is not read by Claude Code.
 
@@ -145,7 +145,7 @@ pkill -f "sema serve"
 
 ## `ModuleNotFoundError: No module named 'sema'`
 
-This means the `sema` binary on your PATH points to a venv where the package is not installed.
+This means the `sema` binary on your PATH points to an environment where the package is not installed.
 
 ```bash
 # 1. Find which binary is being called
@@ -154,12 +154,14 @@ which sema
 # 2. Run the doctor command to diagnose
 sema doctor
 
-# 3. Fix — go to the sema source directory and install
-cd /path/to/sema
-uv pip install -e ".[dev]"
+# 3a. Fix a normal install — reinstall (match how you installed)
+uv tool install --force sema-mcp     # or: pipx reinstall sema-mcp
+
+# 3b. Fix a git clone — reinstall from source
+cd /path/to/sema && uv pip install -e ".[dev]"
 ```
 
-The most common cause: you cloned sema to a second location, set PATH to that venv, but never ran `uv pip install -e .` there.
+The most common cause with a source checkout: you cloned sema to a second location, set PATH to that venv, but never ran `uv pip install -e .` there.
 
 ---
 

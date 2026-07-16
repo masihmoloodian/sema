@@ -1,5 +1,7 @@
 # OpenAI Codex setup
 
+New to sema? See [Why sema](why-sema.md) for what it does and [Installation](installation.md) to install the `sema` command first.
+
 ## Install the Codex CLI
 
 sema's **Codex** provider drives the `codex` CLI, so install it first (skip if you
@@ -15,9 +17,6 @@ brew install --cask codex
 
 # npm
 npm install -g @openai/codex
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
 ```
 
 Then start it once and choose **Sign in with ChatGPT**:
@@ -34,8 +33,9 @@ codex --version   # verify
 cd /your/project
 sema index .
 
-# 2. Register sema with Codex
-sema init --codex
+# 2. Register sema with every AI CLI you have (Claude Code, Codex, opencode)
+sema setup
+#    Or register Codex only:  sema init --codex
 
 # 3. Reload VS Code (if using the VS Code extension)
 #    Cmd+Shift+P → "Developer: Reload Window"

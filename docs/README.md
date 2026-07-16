@@ -1,12 +1,16 @@
 # Sema documentation
 
-Full documentation for sema. Start with the root [README](../README.md) for the quick start.
+Full documentation for sema. Start with the root [README](../README.md) for the
+quick start, or [Why sema](why-sema.md) for the pitch.
+
+> sema runs on **macOS and Linux**. Requires **Python 3.11+**.
 
 ## Getting started
-- [Installation](installation.md) — requirements, `pip install`, and install from source
+- [Installation](installation.md) — platforms, requirements, install paths, from source
 - [Claude Code setup](claude-code.md) — register sema, add `CLAUDE.md`
 - [OpenAI Codex setup](codex.md) — register sema, add `AGENTS.md`
 - [opencode setup](opencode.md) — install, use as a chat provider, add sema via MCP
+- [sema for VS Code](../vscode-extension/README.md) — the chat + agent extension
 - [Working with multiple projects](multi-project.md) — serve many repos from one registration
 - [VS Code workspace setup](vscode-workspace.md) — multi-folder workspaces
 
@@ -22,6 +26,7 @@ Full documentation for sema. Start with the root [README](../README.md) for the 
 - [Troubleshooting](troubleshooting.md) — fixes for common issues
 
 ## Background
+- [Why sema](why-sema.md) — the problem it solves and why it's built this way
 - [Benchmarks](benchmarks.md) — before/after token comparisons on real repos
 - [FAQ](faq.md) — common questions, limitations, and disclaimer
 - [Roadmap](roadmap.md) — planned features

@@ -27,18 +27,24 @@ sema init --codex --uninstall
 
 This removes the `[mcp_servers.sema]` block from `.codex/config.toml`.
 
+To deregister from **every** detected CLI at once (Claude Code, Codex, opencode), use `sema setup --uninstall` — `sema init` targets only one client and has no `--opencode` flag.
+
 ## Update sema to the latest version
 
+Update the same way you installed. The package on PyPI is `sema-mcp`; the command stays `sema`.
+
 ```bash
-cd /path/to/sema
+# Installed with the one-liner or `uv tool install` (recommended):
+uv tool upgrade sema-mcp
 
-# Pull the latest changes
-git pull
+# Installed with pipx:
+pipx upgrade sema-mcp
 
-# Re-install (only needed if dependencies changed)
-pip install -e ".[dev]"
-# or with uv:
-uv pip install -e ".[dev]"
+# Installed with pip:
+pip install --upgrade sema-mcp
+
+# Working from a git clone (contributors):
+cd /path/to/sema && git pull && uv pip install -e ".[dev]"
 
 # Check the version
 sema --version
@@ -46,18 +52,16 @@ sema --version
 
 Your existing project indexes are untouched — no need to re-run `sema index .` unless the release notes say the index format changed.
 
-> Once sema is published to PyPI, updating will be just `pip install --upgrade sema`.
-
 ## Fully remove sema from your machine
 
 ```bash
-# 1. Deactivate from all projects first
-cd your-project && sema init --claude --uninstall
-# or for Codex projects:
-cd your-project && sema init --codex --uninstall
+# 1. Deregister from every detected AI CLI (Claude Code, Codex, opencode)
+cd your-project && sema setup --uninstall
 
-# 2. Delete the sema repo and virtual environment
-rm -rf /path/to/sema
+# 2. Uninstall the sema binary — match how you installed it
+uv tool uninstall sema-mcp     # or: pipx uninstall sema-mcp
+                               # or: pip uninstall sema-mcp
+                               # (git clone: rm -rf /path/to/sema)
 
 # 3. Delete the cached embedding model (~80MB)
 rm -rf ~/.cache/sema/

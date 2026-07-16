@@ -1,6 +1,6 @@
 # VS Code workspace setup
 
-A VS Code workspace (`.code-workspace` file) groups multiple project folders under one window. Sema supports this with two extra flags.
+A VS Code workspace (`.code-workspace` file) groups multiple project folders under one window. Sema supports this with two extra flags. New to sema? See [Why sema](why-sema.md); for the in-editor search and chat panels, see the [VS Code extension](../vscode-extension/README.md).
 
 ## Step-by-step
 
@@ -15,13 +15,15 @@ The `--workspace` flag reads the `.code-workspace` file and indexes only the lis
 
 Paths in the index include the project folder name (`backend/src/auth.ts`, not just `src/auth.ts`), so results are always unambiguous across projects.
 
-**2. Register with Claude Code**
+**2. Register with your AI CLI**
 
 ```bash
+sema setup            # registers every detected CLI (Claude Code, Codex, opencode)
+# or, Claude Code only:
 sema init --claude
 ```
 
-This runs `claude mcp add sema -s user` under the hood, which registers sema at the user level — visible in every project and workspace, not just one folder.
+For Claude Code this runs `claude mcp add sema -s user` under the hood, which registers sema at the user level — visible in every project and workspace, not just one folder.
 
 **3. Add CLAUDE.md to each project folder**
 

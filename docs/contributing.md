@@ -2,25 +2,29 @@
 
 Contributions are welcome. sema is intentionally small — each module has a single responsibility and the test suite makes it straightforward to extend.
 
+This guide covers the Python core (indexer, store, MCP server, CLI). The repo also ships a separate [VS Code extension](../vscode-extension/README.md) with its own setup under `vscode-extension/`. See the [architecture](architecture.md) overview for how the pieces fit together.
+
 ## Development setup
+
+sema runs on macOS and Linux and requires Python 3.11+ (3.12 recommended). The
+project uses [uv](https://docs.astral.sh/uv/) for environment and dependency
+management.
 
 ```bash
 git clone https://github.com/masihmoloodian/sema.git
 cd sema
 
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-# .venv\Scripts\activate        # Windows
+# Create the virtual environment
+uv venv --python 3.12 .venv
 
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Install with dev dependencies (or: uv sync --all-extras)
+uv pip install -e ".[dev]"
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run linter
-ruff check sema/
+uv run ruff check sema/
 ```
 
 ## Adding a new language
@@ -55,7 +59,7 @@ The embedding, storage, and search pipeline are fully language-agnostic — you 
 - Add support for a new language (Rust, Java, Ruby, C#)
 - Improve `find_usages` with a grep-based exact match fallback
 - Add `--verbose` output to `sema index` showing each file as it's processed
-- Test sema on Linux or Windows and report/fix issues
+- Test sema across Linux distributions and report/fix issues
 - Improve search quality for a specific code pattern you've found lacking
 
 ## Submitting changes
@@ -63,5 +67,5 @@ The embedding, storage, and search pipeline are fully language-agnostic — you 
 1. Fork the repo
 2. Create a branch: `git checkout -b feature/your-feature`
 3. Make your changes and add tests
-4. Run `pytest tests/ -v` and `ruff check sema/` — both must pass
+4. Run `uv run pytest tests/ -v` and `uv run ruff check sema/` — both must pass
 5. Open a pull request with a clear description of what and why

@@ -1,8 +1,8 @@
 # Before and after
 
-These comparisons use real, publicly available open-source repositories. Each shows the actual tool calls an AI assistant would make without sema versus the sema approach — with token costs derived from real file sizes.
+These comparisons use real, publicly available open-source repositories. Each shows the actual tool calls an AI assistant would make without sema versus the sema approach. For the bigger picture on why this matters, see [Why sema](why-sema.md).
 
-Token estimates: ~1 token per 4 characters of source code.
+Token counts for files and for `search_code` / `get_code` output are measured with `tiktoken` (`cl100k_base`). The `Bash` command costs in the "without sema" columns are estimates (~150–300 tokens each), since they depend on the exact directory listing returned.
 
 ---
 
@@ -136,6 +136,4 @@ search_code("authentication middleware JWT token")
 | fastapi-users | Python | 123 | 5,963 tokens / 4 calls | 666 tokens / 3 calls | **9×** |
 | golang-gin-realworld | Go | 30 | 2,397 tokens / 4 calls | 552 tokens / 3 calls | **4×** |
 
-Token counts are measured using `tiktoken` (cl100k_base) on the actual files from each repo, and on real `search_code` / `get_code` output. The "without" bash command costs are estimated at ~150–300 tokens each.
-
-The pattern: sema always uses 3 tool calls (search → fetch → fetch). The "without" cost grows with repo size because the AI must read whole files to locate relevant code. On large TypeScript or Python projects the savings are consistently 8–9×.
+The pattern: sema uses 3 tool calls (search → fetch → fetch), and that cost stays roughly flat. The "without sema" cost grows with repo size because the AI must read whole files to locate relevant code. On large TypeScript or Python projects the savings are consistently 8–9×.

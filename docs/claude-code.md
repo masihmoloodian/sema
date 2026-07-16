@@ -1,5 +1,7 @@
 # Claude Code setup
 
+New to sema? See [Why sema](why-sema.md) for what it does and [Installation](installation.md) to install the `sema` command first.
+
 ## Install the Claude Code CLI
 
 sema's **Claude Code** provider drives the `claude` CLI, so install it first (skip
@@ -11,10 +13,6 @@ curl -fsSL https://claude.ai/install.sh | bash
 
 # Homebrew (macOS / Linux)
 brew install --cask claude-code
-
-# Windows (PowerShell)
-irm https://claude.ai/install.ps1 | iex
-#   or:  winget install Anthropic.ClaudeCode
 ```
 
 Then start it once and follow the browser sign-in:
@@ -35,8 +33,9 @@ deprecated in favour of the installers above. Full setup and troubleshooting:
 cd your-project
 sema index .
 
-# 2. Register sema with Claude Code
-sema init --claude
+# 2. Register sema with every AI CLI you have (Claude Code, Codex, opencode)
+sema setup
+#    Or register Claude Code only:  sema init --claude
 
 # 3. Reload VS Code (if using the VS Code extension)
 #    Cmd+Shift+P → "Developer: Reload Window"

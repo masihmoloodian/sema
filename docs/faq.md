@@ -7,7 +7,10 @@ Both Claude Code and Codex start every session cold — no persistent memory of 
 The main culprit is file navigation. Without an index, the AI reads entire files to find the one function it needs. On a 1,000-file TypeScript project, a single "how does auth work?" question can consume 10,000+ tokens just in file reads. Sema's `search_code()` returns only the relevant signatures (~180 tokens), and `get_code()` fetches only the exact function body needed (~300–500 tokens each).
 
 **How do I speed up Claude Code or Codex on a large codebase?**
-Install sema, run `sema index .` once in your project, then `sema init --claude` or `sema init --codex` to register it. Add a `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex) file that tells the AI to call `search_code()` first. From that point on it searches your index instead of reading files — typically 5–10× fewer tool calls per question.
+Install sema, run `sema index .` once in your project, then `sema setup` to register with every detected CLI (or `sema init --claude` / `sema init --codex` for one). Add a `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex) file that tells the AI to call `search_code()` first. From that point on it searches your index instead of reading files — typically 5–10× fewer tool calls per question.
+
+**Which platforms does sema run on?**
+macOS and Linux. The installer is a POSIX shell script, and sema needs Python 3.11+. Windows isn't supported.
 
 **Does sema send my code to any external service?**
 No. Sema runs entirely on your machine. The embedding model (`all-MiniLM-L6-v2`) is downloaded once (~80MB) and cached locally. No API keys, no internet connection required after setup, no data leaves your machine.
@@ -22,14 +25,14 @@ Yes. Sema has full AST-aware parsers for TypeScript, JavaScript, Python, and Go 
 
 ## Limitations
 
-Known limitations in the current version (v0.1.x):
+Known limitations in the current version:
 
-- **AST-aware parsers for TypeScript, Python, Go only** — Ruby, Rust, Java, C#, and others fall back to generic text chunking (searchable, but no symbol-level granularity)
+- **AST-aware parsers for TypeScript, JavaScript, Python, Go only** — Ruby, Rust, Java, C#, and others fall back to generic text chunking (searchable, but no symbol-level granularity)
 - **Call graph is name-based** — calls are matched by symbol name, not by resolved reference; two functions with the same name in different files are indistinguishable to the graph
 - **`find_usages` is approximate** — uses semantic similarity, not AST-level reference tracking; may miss some call sites
 - **Multi-project is discovery-based** — one server can serve many projects via `sema init --root <dir>` ([details](multi-project.md)), but projects must live under a scanned root and each keeps a separate index (no cross-project symbol search yet)
 - **Model fixed at index time** — changing the embedding model requires a full re-index
-- **Tested on macOS only** — Apple Silicon M4 Pro, macOS 26.4; Linux likely works; Windows untested
+- **macOS and Linux only** — no Windows support; primarily tested on Apple Silicon (macOS)
 
 ---
 
@@ -40,7 +43,7 @@ Known limitations in the current version (v0.1.x):
 > - The index format, CLI interface, and MCP tool signatures **may change** between versions without notice
 > - There is **no guarantee of correctness** — sema may miss chunks, return stale results, or fail on unusual code patterns
 > - The embedding model (`all-MiniLM-L6-v2`) runs locally and is **not fine-tuned for code** — results are based on general semantic similarity
-> - sema has been tested on one machine (Apple Silicon M4 Pro, macOS 26.4) and one codebase type (NestJS + Next.js TypeScript monorepo); your results may vary
+> - sema is developed and tested primarily on Apple Silicon (macOS) against one codebase type (NestJS + Next.js TypeScript monorepo); your results may vary
 > - **Do not rely on sema for security-sensitive analysis** — it is a navigation aid, not a code analysis tool
 >
 > Use it, break it, improve it. That's the point.

@@ -3,7 +3,7 @@
 [opencode](https://opencode.ai) is an open-source AI coding agent. You can use it
 with sema two ways: as a **chat provider** inside the sema VS Code extension, or by
 giving opencode sema's **MCP tools** so its own agent searches your index instead of
-reading files blindly.
+reading files blindly. New to sema? See [Why sema](why-sema.md).
 
 ## Install the opencode CLI
 
@@ -67,8 +67,7 @@ the Dock/Finder), set `sema.chat.opencodePath` to the absolute path (`which open
 
 Let opencode's **own** agent call sema's semantic tools (`search_code`, `check_reuse`,
 `get_code`, `find_usages`, `impact_analysis`, `repo_map`) so it stops grepping and
-re-reading files. `sema init` only configures Claude Code and Codex, so add sema to
-opencode by hand.
+re-reading files.
 
 1. Index your project (downloads a ~80MB model on first run):
 
@@ -77,20 +76,30 @@ opencode by hand.
    sema index .
    ```
 
-2. Add sema as a local MCP server in `opencode.json` at your project root:
+2. Register sema with opencode. `sema setup` detects opencode and writes the MCP
+   block into `opencode.json` for you (it also registers any Claude Code and Codex
+   you have):
 
-   ```json
-   {
-     "$schema": "https://opencode.ai/config.json",
-     "mcp": {
-       "sema": {
-         "type": "local",
-         "command": ["sema", "serve", "--project", "."],
-         "enabled": true
-       }
-     }
-   }
+   ```bash
+   sema setup
    ```
+
+   > `sema init` has no opencode flag — opencode registration only happens through
+   > `sema setup`. To wire it up by hand instead, add sema as a local MCP server in
+   > `opencode.json` at your project root:
+   >
+   > ```json
+   > {
+   >   "$schema": "https://opencode.ai/config.json",
+   >   "mcp": {
+   >     "sema": {
+   >       "type": "local",
+   >       "command": ["sema", "serve", "--project", "."],
+   >       "enabled": true
+   >     }
+   >   }
+   > }
+   > ```
 
 3. Restart opencode from the project directory and type `/mcp` — you should see
    **sema** connected.
@@ -130,5 +139,6 @@ Detects file saves and re-indexes only changed files incrementally.
 
 ## Remove sema from opencode
 
-Delete the `sema` entry from the `mcp` block in `opencode.json` (or set
-`"enabled": false`).
+Run `sema setup --uninstall` (removes sema from every detected CLI, opencode
+included), or delete the `sema` entry from the `mcp` block in `opencode.json` by
+hand (or set `"enabled": false`).

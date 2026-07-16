@@ -23,8 +23,13 @@ These files are split into ~50-line sections and embedded as prose. Content is f
 | Styles | `.css` `.scss` |
 | Shell | `.sh` `.bash` |
 | Data / query | `.sql` `.graphql` `.xml` |
-| Dotfiles | `.env` `.gitignore` `.dockerignore` `.envrc` |
+| Plain text | `.txt` |
+| Dotfiles | `.env` (and `.env.*`) `.envrc` `.gitignore` `.gitattributes` `.dockerignore` |
 | Project files | `Makefile` `Dockerfile` `Jenkinsfile` |
+
+Everything else — plus your `.gitignore`d files and a set of always-excluded
+directories and lock files — is skipped. See [Configuration](configuration.md)
+for the exclusion rules.
 
 ## Adding support for a new language
 

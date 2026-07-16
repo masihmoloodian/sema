@@ -36,7 +36,7 @@ check_reuse("generate a JWT for a user")
 → If one of these fits, call get_code("<name>") to read it, then reuse or extend it.
 ```
 
-This is the sema-native take on "reuse before you build": a prompt rule can *tell* an agent to check for duplicates, but only the index can actually answer. The verdict closes the loop — "checked: reuse this" or "checked: nothing exists, safe to build" — so the agent stops reinventing helpers that already live in the repo.
+This is the sema-native take on "reuse before you build": a prompt rule can *tell* an agent to check for duplicates, but only the index can actually answer. The verdict closes the loop — "checked: reuse this" or "checked: nothing exists, safe to build" — so the agent stops reinventing helpers that already live in the repo. See [why sema](why-sema.md) for the reasoning behind this design.
 
 **Measured accuracy.** On a 50-example evaluation over sema's *own* source (25 descriptions of things that exist, 25 that don't, including semantically adjacent decoys), `check_reuse` classifies reuse-vs-build with **F1 = 0.98 / 98% accuracy** (recall 1.0 — it never misses an existing implementation). The two naive strategies an ungrounded agent would use score far lower: "trust the top search hit" gets F1 0.67 (it flags everything as existing), and "just build it" gets F1 0.0 (it never reuses). Thresholds are calibrated on both the fixture and real code; see `tests/test_reuse.py`.
 
