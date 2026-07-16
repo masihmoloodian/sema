@@ -76,6 +76,12 @@ This project adheres to [Semantic Versioning](https://semver.org).
 ## [0.5.0]
 
 ### Added
+- **Focused composer controls.** Attachments, Sema index/redaction/maintenance,
+  Ask/Plan/Agent mode, provider/model/effort, and agent permissions now have separate
+  controls instead of sharing the attachment and settings menus.
+- **Runtime CLI effort discovery.** The extension reads effort levels from the exact
+  configured Claude Code and Codex executables, including Codex's model-specific
+  catalog, and safely falls back for older Codex releases.
 - **Refreshed models with friendly display names.** The picker now shows readable names
   (e.g. "Opus 4.8") instead of raw ids, with optional `<optgroup>` sections supported in
   the schema. Model lists were updated: Claude Code (Opus 4.8 / Fable 5 / Sonnet 5 /
@@ -97,6 +103,9 @@ This project adheres to [Semantic Versioning](https://semver.org).
   read from the session rollout log Codex writes, then remembered per provider.
 
 ### Fixed
+- Stored reasoning effort is validated against the detected CLI and selected model
+  before every run. A stale `xhigh` choice can no longer break an older Codex binary,
+  and Codex authentication remains available when its config contains a newer level.
 - **opencode (local) now runs in your workspace.** In Agent mode opencode was
   operating from a temp directory — creating/editing files under `$TMPDIR/opencode`
   instead of the open project — because its server-based `run` ignores the spawned
