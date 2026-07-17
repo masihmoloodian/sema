@@ -2,7 +2,7 @@
   "name": "sema-codebase-chat",
   "displayName": "sema — semantic code search & chat",
   "description": "Semantic code search, reuse checks, and a codebase-aware chat panel (Claude, OpenAI, DeepSeek, OpenRouter), powered by the local sema index.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "MasihMoloodian",
   "license": "MIT",
   "icon": "media/icon-128.png",
@@ -163,6 +163,11 @@
           "type": "string",
           "default": "opencode",
           "description": "Path to the opencode CLI (the 'opencode (local)' provider). Set an absolute path if `opencode` isn't on VS Code's PATH."
+        },
+        "sema.chat.grokPath": {
+          "type": "string",
+          "default": "grok",
+          "description": "Path to the Grok Build CLI (the 'Grok Build (local)' provider). Set an absolute path if `grok` isn't on VS Code's PATH."
         }
       }
     }
