@@ -3,9 +3,44 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
-## [0.6.5]
+## [0.6.0]
 
 ### Added
+- **Grok Build (xAI) as a local CLI provider.** Drives `grok` in headless mode
+  (`--output-format streaming-json`), streaming answers, reasoning, session resume, and
+  token usage, with **Sign in / Sign out** in the model menu like the other local CLIs.
+  Set `sema.chat.grokPath` if `grok` isn't on VS Code's PATH. Register sema with it from
+  the Manage panel, or with `sema init --grok`; `sema setup` and `sema update` detect it
+  too. Models come from what `grok models` actually reports (`grok-4.5`), not from xAI's
+  docs, which still name a `grok-build` model the live catalog doesn't list; the header
+  resolves what a turn really billed (e.g. `grok-4.5-build-free`). One deliberate gap:
+  Grok's stream carries no tool-call event, so Agent mode shows no per-tool activity.
+- **A header notice when the active provider can't answer yet.** Previously the only hint
+  was a dot on the model pill, which you had to open the menu to understand — so the first
+  feedback was a failed turn. Now the header shows **Sign in** or **Set API key** for the
+  active provider, naming it and acting as the shortcut to fix it. It stays hidden until
+  the sign-in check has actually run, so a signed-in user never sees a false warning.
+
+### Fixed
+- **Your prompt reaches the model as your prompt.** Sema's workflow and retrieved context
+  were concatenated in front of the user's turn for the local CLIs, so the model read them
+  as if the user had typed them — a bare "hi" came back as "I'll use sema's semantic index
+  first…" instead of a greeting. They now travel in each CLI's own system channel:
+  `claude --append-system-prompt` and `grok --rules`, matching the split the Claude Agent
+  SDK path already made. Codex and opencode expose no such flag (Codex's positional *is*
+  its instructions), so context is still inlined there, now with an explicit end-of-context
+  fence before the request. The API providers were already correct — Anthropic passes
+  `system`, and the OpenAI-compatible ones send a `system` role message. Nothing about what
+  sema injects changed, only where it goes: index context still reaches every provider.
+- **Signing in no longer needs a window reload to register.** Sign-in state was only
+  checked when the panel first loaded or the provider changed, and the existing triggers
+  both missed the normal case: the CLI's login leaves its terminal open at the shell
+  prompt, and the panel stays visible throughout, so neither the terminal-close nor the
+  visibility trigger fired. The panel now polls after launching a login and updates
+  itself, and re-checks when the window regains focus if it believes the provider is
+  signed out — which also catches a sign-in done in your own terminal. Both are bounded:
+  polling stops the moment sign-in lands, and the focus check is throttled and never runs
+  once signed in. Applies to every CLI provider, not just Grok.
 - **File attachments across every provider.** Attach images, PDFs, and text files to a
   chat turn with **📎**, by pasting a screenshot, by dropping a file on the composer, or
   from the Explorer context menu (`sema: Attach file to chat`). Each provider receives

@@ -14,11 +14,22 @@ import {
 } from './types';
 import { pathFor } from '../attachments';
 
-/** Flatten the system context + conversation into a single prompt string for a CLI. */
+/**
+ * Flatten the system context + conversation into a single prompt string for a CLI.
+ *
+ * Pass `system` here ONLY for a CLI with no system-prompt channel of its own — today
+ * Codex (`exec`'s positional *is* its instructions) and opencode (`run` has no such
+ * flag). Where a channel exists, send it there and pass '' here: Claude Code takes
+ * `--append-system-prompt`, Grok takes `--rules`. Inlined context reads as if the user
+ * typed it, which is how a bare "hi" comes back answered as though it were about sema.
+ *
+ * When inlining is unavoidable, mark where the context stops so the model can still tell
+ * the user's actual request from the instructions wrapped around it.
+ */
 function flattenPrompt(system: string, messages: ChatMessage[]): string {
   const parts: string[] = [];
   if (system.trim()) {
-    parts.push(system.trim(), '');
+    parts.push(system.trim(), '', '--- End of context. Reply to the request below. ---', '');
   }
   if (messages.length === 1 && messages[0].role === 'user') {
     // Single user turn (the common first-turn case) — pass it through verbatim, with
@@ -109,6 +120,30 @@ function describeTool(tool: string, input: Record<string, unknown>): string {
 /** Claude tools that can change the workspace or execute arbitrary commands. */
 export function isClaudeProtectedTool(tool: string): boolean {
   return ['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'].includes(tool);
+}
+
+/** Phrases each CLI prints when it has no usable credentials. */
+const SIGNED_OUT = /not\s+logged\s*in|not\s+authenticated|logged\s+out|no\s+credentials/i;
+
+/**
+ * Read a CLI's auth-status output and decide whether the user is signed in.
+ *
+ * Each CLI reports this differently and none of them exit non-zero for it:
+ * Claude Code prints JSON with a `loggedIn` field, Codex (`auth list`) and Grok
+ * (`models`) print prose over their normal output. So JSON wins when present, and
+ * everything else falls back to matching the signed-out phrases.
+ */
+export function parseSignedIn(stdout: string): boolean {
+  const out = stdout.trim();
+  try {
+    const parsed = JSON.parse(out) as { loggedIn?: boolean };
+    if (typeof parsed?.loggedIn === 'boolean') {
+      return parsed.loggedIn;
+    }
+  } catch {
+    // Not JSON — every other CLI reports in prose.
+  }
+  return !SIGNED_OUT.test(out);
 }
 
 interface Activity {
@@ -529,9 +564,15 @@ export class ClaudeCodeProvider extends CliProvider {
     if (opts.effort && opts.effort !== 'default') {
       args.push('--effort', opts.effort);
     }
-    // Fresh: system + full history. Resume: only the new user turn (the session holds
-    // the rest). Attachment paths are appended for whichever set of turns that covers.
-    return { bin: 'claude', args, prompt: promptWithPaths(opts, paths) };
+    // Sema's context belongs in the system prompt, not the user's turn — the same split
+    // the Agent SDK path above already makes via `systemPrompt.append`. Inlined, it reads
+    // as if the user typed it, and "hi" gets answered as if it were about sema.
+    if (opts.system.trim()) {
+      args.push('--append-system-prompt', opts.system);
+    }
+    // Fresh: full history. Resume: only the new user turn (the session holds the rest).
+    // Attachment paths are appended for whichever set of turns that covers.
+    return { bin: 'claude', args, prompt: promptWithPaths({ ...opts, system: '' }, paths) };
   }
 
   protected extractDelta(event: unknown): string | null {
@@ -1337,5 +1378,147 @@ export class OpenCodeProvider extends CliProvider {
       return e;
     }
     return e?.data?.message ?? e?.message ?? 'opencode returned an error.';
+  }
+}
+
+/**
+ * xAI's Grok Build (`grok`) in headless mode. Prompt is passed via `-p`, so the
+ * trailing positional the base class appends lands as that flag's value.
+ *
+ * `--output-format streaming-json` emits newline-delimited events typed
+ * `text` / `thought` / `end` / `error`. The list is explicitly non-exhaustive and
+ * carries no tool-call event, so this provider reports no activities.
+ */
+export class GrokProvider extends CliProvider {
+  readonly id = 'grok';
+  readonly label = 'Grok Build (local)';
+  // Taken from `grok models` on a signed-in account (grok 0.2.102), which reports
+  // exactly one: "grok-4.5 (default)". xAI's docs still name `grok-build`, but the live
+  // catalog does not list it, so it isn't offered here. The catalog is per-account, so
+  // "+ custom id…" reaches whatever else an account or a custom endpoint exposes.
+  readonly modelInfos: ModelInfo[] = [
+    { id: 'grok-4.5', name: 'Grok 4.5', recommended: true },
+  ];
+  readonly defaultModel = 'grok-4.5';
+  // Mirrors `--reasoning-effort/--effort`: canonical levels none, minimal, low,
+  // medium, high, xhigh, max. `max` is an alias of `xhigh`, so it is not listed twice.
+  readonly efforts = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  readonly modelHint = 'grok-4.5 — run `grok models` to list your account’s models';
+  // grok has no dedicated auth-status verb, but `grok models` prints "You are not
+  // authenticated." over the catalog when signed out (and exits 0 either way), which
+  // the shared plain-text sign-in check already recognises. `grok login` opens a
+  // browser; `--device-code` is the headless alternative.
+  readonly auth = { login: ['login'], logout: ['logout'], status: ['models'] };
+
+  /**
+   * Text only. xAI documents no vision capability for the models `grok models` lists,
+   * and claiming it would turn an image attachment into a silent "I cannot view images"
+   * reply rather than an up-front explanation. Text inlines into the prompt, so it works
+   * regardless.
+   */
+  accepts(): readonly AttachmentKind[] {
+    return ['text'];
+  }
+
+  protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
+    const args = ['--output-format', 'streaming-json'];
+    if (opts.cwd) {
+      args.push('--cwd', opts.cwd);
+    }
+    if (opts.sessionId) {
+      args.push('-r', opts.sessionId);
+    }
+    if (opts.model && opts.model !== 'default') {
+      args.push('-m', opts.model);
+    }
+    if (opts.effort && opts.effort !== 'default') {
+      args.push('--effort', opts.effort);
+    }
+    if (opts.agent) {
+      // Auto-approve, or a headless run blocks forever on the first tool prompt.
+      args.push('--yolo');
+    } else {
+      // Ask/Plan stay read-only. The allowlist takes internal tool ids, and grok keeps
+      // the always-on MCP meta-tools on top of it — so sema's tools survive the filter.
+      args.push('--tools', 'read_file,grep,list_dir');
+    }
+    // Sema's context goes to the system prompt, which is what `--rules` appends to, so the
+    // user's turn stays their own words. Inlined instead, it reads as the user's message
+    // and a bare "hi" comes back answered as though it were a question about sema.
+    if (opts.system.trim()) {
+      args.push('--rules', opts.system);
+    }
+    // Fresh: full history. Resume: only the new user turn (the session holds the rest).
+    const prompt = opts.sessionId
+      ? opts.messages[opts.messages.length - 1]?.content ?? ''
+      : flattenPrompt('', opts.messages);
+    // `-p` last: the base class appends the prompt positional, making it this flag's value.
+    args.push('-p');
+    return { bin: 'grok', args, prompt };
+  }
+
+  protected extractDelta(event: unknown): string | null {
+    const o = event as { type?: string; data?: string };
+    return o?.type === 'text' ? o.data ?? null : null;
+  }
+
+  protected extractThinking(event: unknown): string | null {
+    const o = event as { type?: string; data?: string };
+    return o?.type === 'thought' ? o.data ?? null : null;
+  }
+
+  protected extractActivities(): Activity[] {
+    // grok's streaming-json carries no tool-call event.
+    return [];
+  }
+
+  protected extractSession(event: unknown): string | null {
+    const o = event as { type?: string; sessionId?: string };
+    return o?.type === 'end' && typeof o.sessionId === 'string' ? o.sessionId : null;
+  }
+
+  protected extractModel(event: unknown): string | null {
+    const o = event as { type?: string; modelUsage?: Record<string, unknown> };
+    if (o?.type !== 'end' || !o.modelUsage) {
+      return null;
+    }
+    // `end` reports spend per model, keyed by the id actually billed — which resolves
+    // what a selection really mapped to (picking grok-4.5 bills `grok-4.5-build-free`).
+    // Subagents get their own entries with no marker saying which is the main model, so
+    // a single key is the only unambiguous case; otherwise say nothing.
+    const ids = Object.keys(o.modelUsage);
+    return ids.length === 1 ? ids[0] : null;
+  }
+
+  protected extractUsage(event: unknown): TokenUsage | null {
+    const o = event as {
+      type?: string;
+      usage?: {
+        input_tokens?: number;
+        cache_read_input_tokens?: number;
+        output_tokens?: number;
+      };
+      total_cost_usd?: number;
+    };
+    if (o?.type !== 'end' || !o.usage) {
+      return null;
+    }
+    // grok reports `input_tokens` uncached-only, so add the cache hits back to match
+    // TokenUsage.inputTokens (full input, of which cachedInputTokens is the cheap part).
+    // `output_tokens` already includes reasoning tokens — grok's own total_tokens is
+    // input_tokens + cache_read_input_tokens + output_tokens — so don't add them again.
+    const cacheRead = o.usage.cache_read_input_tokens ?? 0;
+    return {
+      inputTokens: (o.usage.input_tokens ?? 0) + cacheRead,
+      outputTokens: o.usage.output_tokens ?? 0,
+      cachedInputTokens: cacheRead,
+      // Absent means unreported or partial, never free — leave it undefined.
+      costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined,
+    };
+  }
+
+  protected checkError(event: unknown): string | null {
+    const o = event as { type?: string; message?: string };
+    return o?.type === 'error' ? o.message ?? 'Grok Build returned an error.' : null;
   }
 }

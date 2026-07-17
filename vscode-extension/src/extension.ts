@@ -271,10 +271,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!requireWorkspace()) return;
       const pick = await vscode.window.showQuickPick(
         [
-          { label: 'All installed agents', provider: undefined, detail: 'Claude Code, Codex, and opencode' },
+          {
+            label: 'All installed agents',
+            provider: undefined,
+            detail: 'Claude Code, Codex, opencode, and Grok Build',
+          },
           { label: 'Claude Code', provider: 'claude' },
           { label: 'Codex', provider: 'codex' },
           { label: 'opencode', provider: 'opencode' },
+          { label: 'Grok Build', provider: 'grok' },
         ],
         {
           title: 'Update coding-agent CLIs',
@@ -342,6 +347,12 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('sema.manage.unregisterCodex', () =>
       runCli('sema: unregistering Codex…', (c) => c.register('codex', true), { toast: initToast }),
+    ),
+    vscode.commands.registerCommand('sema.manage.registerGrok', () =>
+      runCli('sema: registering Grok Build…', (c) => c.register('grok', false), { toast: initToast }),
+    ),
+    vscode.commands.registerCommand('sema.manage.unregisterGrok', () =>
+      runCli('sema: unregistering Grok Build…', (c) => c.register('grok', true), { toast: initToast }),
     ),
 
     vscode.commands.registerCommand('sema.manage.doctor', () =>

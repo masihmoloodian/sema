@@ -31,9 +31,10 @@ def main():
 
 
 _AGENT_CLIS = {
-    "claude": {"binary": "claude", "update": ["update"], "version": ["--version"]},
-    "codex": {"binary": "codex", "update": ["update"], "version": ["--version"]},
-    "opencode": {"binary": "opencode", "update": ["upgrade"], "version": ["--version"]},
+    "claude": {"binary": "claude", "update": ["update"], "version": ["--version"], "label": "Claude Code"},
+    "codex": {"binary": "codex", "update": ["update"], "version": ["--version"], "label": "Codex"},
+    "opencode": {"binary": "opencode", "update": ["upgrade"], "version": ["--version"], "label": "opencode"},
+    "grok": {"binary": "grok", "update": ["update"], "version": ["--version"], "label": "Grok Build"},
 }
 
 
@@ -50,7 +51,8 @@ def update_agents(providers: tuple[str, ...], check: bool) -> None:
     """Check or update supported coding-agent CLIs.
 
     Uses each project's official self-updater: `claude update`, `codex update`,
-    and `opencode upgrade`. Authentication and configuration are preserved.
+    `opencode upgrade`, and `grok update`. Authentication and configuration are
+    preserved.
     """
     selected = providers or tuple(_AGENT_CLIS)
     failures = 0
@@ -58,7 +60,7 @@ def update_agents(providers: tuple[str, ...], check: bool) -> None:
     for provider in selected:
         spec = _AGENT_CLIS[provider]
         binary = shutil.which(spec["binary"])
-        label = "Claude Code" if provider == "claude" else provider
+        label = spec["label"]
         if not binary:
             console.print(f"[dim]–[/dim] {label}: not installed")
             continue
@@ -223,26 +225,36 @@ def _claude_mcp_remove(scope: str = "user") -> bool:
     return result.returncode == 0
 
 
-def _codex_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
-    """Write [mcp_servers.sema] into <project>/.codex/config.toml. Returns (changed, config_path).
-
-    Uses project-level config (not ~/.codex/config.toml) so the hardcoded project
-    path is correct — Codex does not support {workspace_folder} template substitution.
-    In multi-project mode (roots given) the block serves every project under the roots.
-    """
+def _sema_bin() -> str:
+    """Absolute path to the sema binary, for baking into a client's config."""
     import sys
-    sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
-    config_path = project_root / ".codex" / "config.toml"
+    return shutil.which("sema") or str(Path(sys.executable).parent / "sema")
+
+
+def _toml_mcp_config_add(
+    config_path: Path,
+    project_root: Path,
+    roots: list[Path] | None,
+    *,
+    startup_timeout: str,
+    tool_timeout: str,
+) -> tuple[bool, Path]:
+    """Append [mcp_servers.sema] to a TOML config unless it is already there.
+
+    Shared by Codex and Grok Build, which accept the same block. The timeouts are
+    passed pre-formatted because the two disagree on type: Codex takes TOML floats,
+    while Grok deserializes into `Option<u64>` and fails on anything but an integer.
+    """
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     args_toml = ", ".join(f'"{a}"' for a in _serve_args(project_root, roots))
     block = (
         "\n[mcp_servers.sema]\n"
         "enabled = true\n"
-        f'command = "{sema_bin}"\n'
+        f'command = "{_sema_bin()}"\n'
         f"args = [{args_toml}]\n"
-        "startup_timeout_sec = 15.0\n"
-        "tool_timeout_sec = 60.0\n"
+        f"startup_timeout_sec = {startup_timeout}\n"
+        f"tool_timeout_sec = {tool_timeout}\n"
     )
 
     existing = config_path.read_text() if config_path.exists() else ""
@@ -253,7 +265,39 @@ def _codex_config_add(project_root: Path, roots: list[Path] | None = None) -> tu
     return True, config_path
 
 
-def _codex_config_remove(config_path: Path) -> bool:
+def _codex_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
+    """Write [mcp_servers.sema] into <project>/.codex/config.toml. Returns (changed, config_path).
+
+    Uses project-level config (not ~/.codex/config.toml) so the hardcoded project
+    path is correct — Codex does not support {workspace_folder} template substitution.
+    In multi-project mode (roots given) the block serves every project under the roots.
+    """
+    return _toml_mcp_config_add(
+        project_root / ".codex" / "config.toml",
+        project_root,
+        roots,
+        startup_timeout="15.0",
+        tool_timeout="60.0",
+    )
+
+
+def _grok_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
+    """Write [mcp_servers.sema] into <project>/.grok/config.toml. Returns (changed, config_path).
+
+    Grok loads .grok/config.toml from every directory between cwd and the git root,
+    and [mcp_servers] is one of the few sections it honours there, so the project
+    path is baked in exactly as for Codex. Timeouts must be TOML integers.
+    """
+    return _toml_mcp_config_add(
+        project_root / ".grok" / "config.toml",
+        project_root,
+        roots,
+        startup_timeout="30",
+        tool_timeout="60",
+    )
+
+
+def _toml_mcp_config_remove(config_path: Path) -> bool:
     """Remove the [mcp_servers.sema] block from config.toml. Returns True if removed."""
     if not config_path.exists():
         return False
@@ -323,13 +367,14 @@ def _opencode_config_remove(config_path: Path) -> bool:
 
 
 @main.command()
-@click.option("--uninstall", is_flag=True, help="Remove sema from Claude Code / Codex")
+@click.option("--uninstall", is_flag=True, help="Remove sema from the selected client")
 @click.option("--codex", "target", flag_value="codex", help="Register with OpenAI Codex")
+@click.option("--grok", "target", flag_value="grok", help="Register with Grok Build")
 @click.option("--claude", "target", flag_value="claude", default=True, help="Register with Claude Code (default)")
 @click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
               help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
 def init(uninstall: bool, target: str, roots: tuple[str, ...]):
-    """Register sema as an MCP server with Claude Code or OpenAI Codex.
+    """Register sema as an MCP server with Claude Code, OpenAI Codex, or Grok Build.
 
     Single-project by default (the current directory). Pass one or more --root
     directories to serve every indexed project found beneath them at once.
@@ -340,6 +385,8 @@ def init(uninstall: bool, target: str, roots: tuple[str, ...]):
 
     if target == "codex":
         _init_codex(uninstall, project_root, index_path, root_paths)
+    elif target == "grok":
+        _init_grok(uninstall, project_root, index_path, root_paths)
     else:
         _init_claude(uninstall, project_root, index_path, root_paths)
 
@@ -427,7 +474,7 @@ def _init_claude(uninstall: bool, project_root: Path, index_path: Path, roots: l
 def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
     config_path = project_root / ".codex" / "config.toml"
     if uninstall:
-        removed = _codex_config_remove(config_path)
+        removed = _toml_mcp_config_remove(config_path)
         if removed:
             console.print(f"[yellow]✔[/yellow] Removed \\[mcp_servers.sema] from {config_path}")
         else:
@@ -451,21 +498,54 @@ def _init_codex(uninstall: bool, project_root: Path, index_path: Path, roots: li
     console.print("\n[bold]Done.[/bold] Run [bold]/mcp[/bold] in Codex to confirm.")
 
 
+def _init_grok(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
+    config_path = project_root / ".grok" / "config.toml"
+    if uninstall:
+        removed = _toml_mcp_config_remove(config_path)
+        if removed:
+            console.print(f"[yellow]✔[/yellow] Removed \\[mcp_servers.sema] from {config_path}")
+        else:
+            console.print(f"[yellow]–[/yellow] \\[mcp_servers.sema] not found in {config_path}")
+        return
+
+    if roots:
+        _report_discovered(roots)
+    elif not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    changed, config_path = _grok_config_add(project_root, roots=roots or None)
+    if changed:
+        mode = "project scope, multi-project" if roots else "project scope"
+        console.print(f"[green]✔[/green] Registered as MCP server 'sema' ({mode})")
+        console.print(f"[dim]  {config_path}[/dim]")
+    else:
+        console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
+    _install_navigation_skills(project_root, roots, {"grok"})
+    # Grok refuses to start project-scoped servers in an untrusted folder, so a
+    # successful write alone doesn't mean sema will load. Say so here — otherwise
+    # the first symptom is sema silently missing from /mcps.
+    console.print("\n[bold]Done.[/bold] Run [bold]grok[/bold] in this project and accept the trust prompt,")
+    console.print("then [bold]/mcps[/bold] to confirm. Check any time with: [bold]grok mcp doctor sema[/bold]")
+
+
 @main.command()
 @click.option("--uninstall", is_flag=True, help="Remove sema from every detected AI CLI")
 @click.option("--skip-claude", is_flag=True, help="Do not touch Claude Code")
 @click.option("--skip-codex", is_flag=True, help="Do not touch OpenAI Codex")
 @click.option("--skip-opencode", is_flag=True, help="Do not touch opencode")
+@click.option("--skip-grok", is_flag=True, help="Do not touch Grok Build")
 @click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
               help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
-def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: bool, roots: tuple[str, ...]):
+def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: bool,
+          skip_grok: bool, roots: tuple[str, ...]):
     """Detect installed AI CLIs and register sema with each in one shot.
 
     The one-command counterpart to `sema init`: instead of registering with a
-    single client, it discovers which of Claude Code, Codex, and opencode are
-    installed and wires sema into each. Idempotent and safe to re-run. Skip any
-    client with --skip-<name>; env vars SEMA_SKIP_CLAUDE / SEMA_SKIP_CODEX /
-    SEMA_SKIP_OPENCODE (set by the installer) are honoured too.
+    single client, it discovers which of Claude Code, Codex, opencode, and Grok
+    Build are installed and wires sema into each. Idempotent and safe to re-run.
+    Skip any client with --skip-<name>; env vars SEMA_SKIP_CLAUDE / SEMA_SKIP_CODEX
+    / SEMA_SKIP_OPENCODE / SEMA_SKIP_GROK (set by the installer) are honoured too.
     """
     import os
 
@@ -476,9 +556,10 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
     skip_claude = skip_claude or os.environ.get("SEMA_SKIP_CLAUDE") == "1"
     skip_codex = skip_codex or os.environ.get("SEMA_SKIP_CODEX") == "1"
     skip_opencode = skip_opencode or os.environ.get("SEMA_SKIP_OPENCODE") == "1"
+    skip_grok = skip_grok or os.environ.get("SEMA_SKIP_GROK") == "1"
 
-    # Both project-scoped clients (codex, opencode) need an index present unless
-    # we're serving whole roots. Claude is user-scoped and checked the same way.
+    # Every project-scoped client (codex, opencode, grok) needs an index present
+    # unless we're serving whole roots. Claude is user-scoped and checked the same way.
     if not uninstall and not root_paths and not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
         return
@@ -489,6 +570,7 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
     claude_bin = _find_claude_bin()
     codex_bin = shutil.which("codex")
     opencode_bin = shutil.which("opencode")
+    grok_bin = shutil.which("grok")
 
     console.print()
     verb = "Removing" if uninstall else "Registering"
@@ -522,7 +604,7 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
         any_client = True
         codex_cfg = project_root / ".codex" / "config.toml"
         if uninstall:
-            removed = _codex_config_remove(codex_cfg)
+            removed = _toml_mcp_config_remove(codex_cfg)
             console.print(f"  Codex        {'[yellow]✔ removed[/yellow]' if removed else '[dim]– nothing to remove[/dim]'}")
         else:
             changed, _cfg = _codex_config_add(project_root, roots=root_paths or None)
@@ -545,12 +627,28 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
             console.print(f"  opencode     {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
             skill_providers.add("opencode")
 
+    # ── Grok Build (project scope) ────────────────────────────────────────────
+    if skip_grok:
+        console.print("  Grok Build   [dim]– skipped[/dim]")
+    elif not grok_bin:
+        console.print("  Grok Build   [dim]– CLI not found[/dim]")
+    else:
+        any_client = True
+        grok_cfg = project_root / ".grok" / "config.toml"
+        if uninstall:
+            removed = _toml_mcp_config_remove(grok_cfg)
+            console.print(f"  Grok Build   {'[yellow]✔ removed[/yellow]' if removed else '[dim]– nothing to remove[/dim]'}")
+        else:
+            changed, _cfg = _grok_config_add(project_root, roots=root_paths or None)
+            console.print(f"  Grok Build   {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+            skill_providers.add("grok")
+
     if not uninstall:
         _install_navigation_skills(project_root, root_paths, skill_providers)
 
     console.print()
     if not any_client and not uninstall:
-        console.print("[yellow]No supported AI CLIs detected.[/yellow] Install Claude Code, Codex, or opencode, then re-run [bold]sema setup[/bold].")
+        console.print("[yellow]No supported AI CLIs detected.[/yellow] Install Claude Code, Codex, opencode, or Grok Build, then re-run [bold]sema setup[/bold].")
     elif not uninstall:
         console.print("[bold]Done.[/bold] Run [bold]/mcp[/bold] in your AI CLI to confirm, or [bold]sema doctor[/bold] to diagnose.")
 
@@ -831,17 +929,24 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
             claude_registered = "sema" in json.loads(claude_cfg.read_text()).get("mcpServers", {})
         except Exception:
             pass
-    codex_registered = False
-    codex_cfg = project_root / ".codex" / "config.toml"
-    if codex_cfg.exists():
+    def _toml_registered(config_path: Path) -> bool:
+        if not config_path.exists():
+            return False
         try:
-            codex_registered = "[mcp_servers.sema]" in codex_cfg.read_text()
+            return "[mcp_servers.sema]" in config_path.read_text()
         except Exception:
-            pass
+            return False
+
+    codex_registered = _toml_registered(project_root / ".codex" / "config.toml")
+    grok_registered = _toml_registered(project_root / ".grok" / "config.toml")
 
     _emit_json({
         "index": index,
-        "registration": {"claude": claude_registered, "codex": codex_registered},
+        "registration": {
+            "claude": claude_registered,
+            "codex": codex_registered,
+            "grok": grok_registered,
+        },
     })
 
 
@@ -1140,41 +1245,46 @@ def status(verbose: bool, as_json: bool):
     else:
         console.print("  Claude Code  [dim]–[/dim] claude CLI not found")
 
-    # Codex
-    codex_config = project_root / ".codex" / "config.toml"
-    if codex_config.exists():
-        content = codex_config.read_text()
-        if "[mcp_servers.sema]" in content:
-            serving = None
-            served_roots = _re.findall(r'"--root",\s*"([^"]+)"', content)
-            if not served_roots:
-                m = _re.search(r'"--project",\s*"([^"]+)"', content)
-                if m:
-                    serving = m.group(1)
+    # Codex and Grok Build — same TOML block, different config path.
+    def _print_toml_client(label: str, config_path: Path, flag: str) -> None:
+        fix = f"sema init {flag} --uninstall && sema init {flag}"
+        if not config_path.exists():
+            console.print(f"  {label} [dim]–[/dim] not registered — run: sema init {flag}")
+            return
+        content = config_path.read_text()
+        if "[mcp_servers.sema]" not in content:
+            console.print(f"  {label} [yellow]–[/yellow] not registered — run: sema init {flag}")
+            return
 
-            # Check if binary in config exists
-            cmd_ok = True
-            cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
-            if cm and not Path(cm.group(1)).exists():
-                console.print("  Codex        [red]✗ Failed[/red]")
-                console.print(f"  [dim]  Binary not found: {cm.group(1)}[/dim]")
-                console.print("  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
-                cmd_ok = False
+        serving = None
+        served_roots = _re.findall(r'"--root",\s*"([^"]+)"', content)
+        if not served_roots:
+            m = _re.search(r'"--project",\s*"([^"]+)"', content)
+            if m:
+                serving = m.group(1)
 
-            if cmd_ok:
-                console.print("  Codex        [green]✔ Connected[/green]")
+        # Check if binary in config exists
+        cmd_ok = True
+        cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
+        if cm and not Path(cm.group(1)).exists():
+            console.print(f"  {label} [red]✗ Failed[/red]")
+            console.print(f"  [dim]  Binary not found: {cm.group(1)}[/dim]")
+            console.print(f"  [dim]  Fix: {fix}[/dim]")
+            cmd_ok = False
 
-            if served_roots:
-                _print_serving_roots(served_roots, project_root)
-            else:
-                _print_serving(serving, project_root, "sema init --codex --uninstall && sema init --codex")
+        if cmd_ok:
+            console.print(f"  {label} [green]✔ Connected[/green]")
 
-            if verbose:
-                console.print(f"  [dim]  config:  {codex_config}[/dim]")
+        if served_roots:
+            _print_serving_roots(served_roots, project_root)
         else:
-            console.print("  Codex        [yellow]–[/yellow] not registered — run: sema init --codex")
-    else:
-        console.print("  Codex        [dim]–[/dim] not registered — run: sema init --codex")
+            _print_serving(serving, project_root, fix)
+
+        if verbose:
+            console.print(f"  [dim]  config:  {config_path}[/dim]")
+
+    _print_toml_client("Codex       ", project_root / ".codex" / "config.toml", "--codex")
+    _print_toml_client("Grok Build  ", project_root / ".grok" / "config.toml", "--grok")
 
     # Binary
     if verbose:
@@ -1388,45 +1498,58 @@ def doctor():
     if not claude:
         console.print("  [dim]  (claude CLI not found — live status check skipped)[/dim]")
 
-    # ── 5. Codex registration ────────────────────────────────────────────────
-    console.print("\n[bold]5. Codex registration[/bold]")
-    codex_config = Path(".codex/config.toml")
-    console.print(f"  [dim]  config: {codex_config.resolve()}[/dim]")
-    if codex_config.exists():
-        content = codex_config.read_text()
-        if "[mcp_servers.sema]" in content:
-            cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
-            pm = _re.search(r'"--project",\s*"([^"]+)"', content)
-            reg_binary  = cm.group(1) if cm else None
-            reg_project = pm.group(1) if pm else None
+    # ── 5/6. TOML-configured clients (Codex, Grok Build) ─────────────────────
+    def _doctor_toml_client(heading: str, config_path: Path, label: str, flag: str) -> tuple[bool, int]:
+        """Report one TOML-configured client. Returns (ok, warnings) to fold in."""
+        client_ok, client_warnings = True, 0
+        fix = f"sema init {flag} --uninstall && sema init {flag}"
+        console.print(f"\n[bold]{heading}[/bold]")
+        console.print(f"  [dim]  config: {config_path.resolve()}[/dim]")
+        if not config_path.exists():
+            console.print(f"  [dim]–[/dim] No {config_path} — run sema init {flag} if using {label}")
+            return client_ok, client_warnings
 
-            if reg_binary:
-                console.print(f"  [dim]  binary:  {reg_binary}[/dim]")
-            if reg_project:
-                console.print(f"  [dim]  project: {reg_project}[/dim]")
+        content = config_path.read_text()
+        if "[mcp_servers.sema]" not in content:
+            console.print(f"  [yellow]–[/yellow] {config_path} exists but sema not registered")
+            console.print(f"  [dim]  Fix: sema init {flag}[/dim]")
+            return client_ok, client_warnings + 1
 
-            if reg_binary and not Path(reg_binary).exists():
-                console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
-                console.print("  [dim]  Fix: sema init --codex --uninstall && sema init --codex[/dim]")
-                ok = False
-            else:
-                console.print("  [green]✔[/green] Registered and binary exists")
+        cm = _re.search(r'^command\s*=\s*"([^"]+)"', content, _re.MULTILINE)
+        pm = _re.search(r'"--project",\s*"([^"]+)"', content)
+        reg_binary = cm.group(1) if cm else None
+        reg_project = pm.group(1) if pm else None
 
-            if reg_project and Path(reg_project).resolve() != project_root:
-                console.print("  [yellow]⚠[/yellow]  Registered project does not match cwd")
-                console.print(f"  [dim]     registered: {reg_project}[/dim]")
-                console.print(f"  [dim]     cwd:        {project_root}[/dim]")
-                console.print("  [dim]     Fix: sema init --codex --uninstall && sema init --codex[/dim]")
-                warnings += 1
+        if reg_binary:
+            console.print(f"  [dim]  binary:  {reg_binary}[/dim]")
+        if reg_project:
+            console.print(f"  [dim]  project: {reg_project}[/dim]")
+
+        if reg_binary and not Path(reg_binary).exists():
+            console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
+            console.print(f"  [dim]  Fix: {fix}[/dim]")
+            client_ok = False
         else:
-            console.print("  [yellow]–[/yellow] .codex/config.toml exists but sema not registered")
-            console.print("  [dim]  Fix: sema init --codex[/dim]")
-            warnings += 1
-    else:
-        console.print("  [dim]–[/dim] No .codex/config.toml — run sema init --codex if using Codex")
+            console.print("  [green]✔[/green] Registered and binary exists")
 
-    # ── 6. Agent guidance ────────────────────────────────────────────────────
-    console.print("\n[bold]6. Agent guidance (skills / instruction files)[/bold]")
+        if reg_project and Path(reg_project).resolve() != project_root:
+            console.print("  [yellow]⚠[/yellow]  Registered project does not match cwd")
+            console.print(f"  [dim]     registered: {reg_project}[/dim]")
+            console.print(f"  [dim]     cwd:        {project_root}[/dim]")
+            console.print(f"  [dim]     Fix: {fix}[/dim]")
+            client_warnings += 1
+        return client_ok, client_warnings
+
+    for heading, cfg, label, flag in [
+        ("5. Codex registration", Path(".codex/config.toml"), "Codex", "--codex"),
+        ("6. Grok Build registration", Path(".grok/config.toml"), "Grok Build", "--grok"),
+    ]:
+        client_ok, client_warnings = _doctor_toml_client(heading, cfg, label, flag)
+        ok = ok and client_ok
+        warnings += client_warnings
+
+    # ── 7. Agent guidance ────────────────────────────────────────────────────
+    console.print("\n[bold]7. Agent guidance (skills / instruction files)[/bold]")
     claude_md = Path("CLAUDE.md")
     agents_md = Path("AGENTS.md")
     skill_files = [
@@ -1452,8 +1575,8 @@ def doctor():
         console.print("  [dim]  Run sema setup to install provider-specific navigation skills[/dim]")
         warnings += 1
 
-    # ── 7. Lingering processes ───────────────────────────────────────────────
-    console.print("\n[bold]7. Running processes[/bold]")
+    # ── 8. Lingering processes ───────────────────────────────────────────────
+    console.print("\n[bold]8. Running processes[/bold]")
     result = subprocess.run(["pgrep", "-f", "sema serve"], capture_output=True, text=True)
     pids = [p.strip() for p in result.stdout.splitlines() if p.strip()]
     if pids:
@@ -1461,8 +1584,8 @@ def doctor():
     else:
         console.print("  [dim]–[/dim] No sema serve process running (started on demand by AI tool)")
 
-    # ── 8. Index ─────────────────────────────────────────────────────────────
-    console.print("\n[bold]8. Index[/bold]")
+    # ── 9. Index ─────────────────────────────────────────────────────────────
+    console.print("\n[bold]9. Index[/bold]")
     index_path = Path(".") / DEFAULT_INDEX_DIR
     meta_path = Path(".") / DEFAULT_META_FILE
     if index_path.exists():

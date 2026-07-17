@@ -56,7 +56,7 @@ Then, inside each project:
 ```bash
 cd your-project
 sema index .     # build the local semantic index
-sema setup       # register with every detected CLI: Claude Code, Codex, opencode
+sema setup       # register with every detected CLI: Claude Code, Codex, opencode, Grok Build
 ```
 
 Confirm with `sema --version`, and inside your editor type `/mcp` to see

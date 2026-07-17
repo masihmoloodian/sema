@@ -13,17 +13,20 @@ sema list                                     List indexed files and the symbols
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
 sema setup                                    Detect installed AI CLIs and register sema with each in one shot
-sema setup --skip-codex                       Register all detected CLIs except Codex (also --skip-claude / --skip-opencode)
+sema setup --skip-codex                       Register all detected CLIs except Codex (also --skip-claude / --skip-opencode / --skip-grok)
 sema setup --uninstall                        Remove sema from every detected AI CLI
-sema update --check                           Show installed Claude Code, Codex, and opencode versions
+sema update --check                           Show installed Claude Code, Codex, opencode, and Grok Build versions
 sema update                                   Run every installed coding agent's official self-updater
-sema update --provider codex                  Update one agent only (claude / codex / opencode; repeatable)
+sema update --provider codex                  Update one agent only (claude / codex / opencode / grok; repeatable)
 sema init --claude                            Register sema as MCP server with Claude Code (via claude mcp add -s user)
 sema init --claude --root ~/code              Multi-project: serve every indexed project under ~/code (repeatable)
 sema init --claude --uninstall                Remove sema from Claude Code and kill running processes
 sema init --codex                             Register sema as MCP server with OpenAI Codex (.codex/config.toml in project)
 sema init --codex --root ~/code               Multi-project registration for Codex
 sema init --codex --uninstall                 Remove sema from Codex config
+sema init --grok                              Register sema as MCP server with Grok Build (.grok/config.toml in project)
+sema init --grok --root ~/code                Multi-project registration for Grok Build
+sema init --grok --uninstall                  Remove sema from Grok Build config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10                Return more results
 sema search "query" --all-types               Include docs/config sections in results
@@ -40,12 +43,12 @@ sema serve --root ~/code                       Start MCP server for every indexe
 ## `sema setup` vs `sema init`
 
 `sema setup` is the one-command way to register sema: it detects which of
-**Claude Code**, **Codex**, and **opencode** are installed and wires sema into
-each. It's idempotent and safe to re-run. Skip a client with `--skip-claude`,
-`--skip-codex`, or `--skip-opencode`.
+**Claude Code**, **Codex**, **opencode**, and **Grok Build** are installed and
+wires sema into each. It's idempotent and safe to re-run. Skip a client with
+`--skip-claude`, `--skip-codex`, `--skip-opencode`, or `--skip-grok`.
 
-`sema init` registers a single client: `--claude` (the default) or `--codex`.
-It has no `--opencode` flag — use `sema setup` to reach opencode.
+`sema init` registers a single client: `--claude` (the default), `--codex`, or
+`--grok`. It has no `--opencode` flag — use `sema setup` to reach opencode.
 
 Both accept `--root <dir>` (repeatable) to serve every indexed project beneath a
 directory at once. See [multi-project mode](multi-project.md).
@@ -54,7 +57,7 @@ directory at once. See [multi-project mode](multi-project.md).
 
 `sema update` keeps the local agent executables current without replacing their
 authentication or configuration. It invokes each project's self-updater:
-`claude update`, `codex update`, and `opencode upgrade`. Missing agents are
+`claude update`, `codex update`, `opencode upgrade`, and `grok update`. Missing agents are
 skipped; use `--provider` one or more times to target a subset. After updating,
 restart active agent sessions and reload the VS Code extension so its model and
 effort selectors reflect the installed versions.

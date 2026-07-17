@@ -36,6 +36,9 @@ const html = ChatViewProvider.prototype.getHtml.call({});
 for (const id of ['plusbtn', 'semabtn', 'modepill', 'permissionpill', 'modelpill']) {
   if (!html.includes(`id="${id}"`)) throw new Error(`composer is missing the ${id} control`);
 }
+// The header notice is the only pre-send signal that a provider cannot answer yet
+// (missing API key, or not signed in), so it must survive refactors of the header.
+if (!html.includes('id="authnotice"')) throw new Error('header is missing the authnotice control');
 if (html.includes('id="gearbtn"')) throw new Error('legacy overloaded gear control is still present');
 if (!html.includes("plusBtn.addEventListener('click', function(){ vscode.postMessage({type:'attach'}); });")) {
   throw new Error('attachment button is not a direct file attachment action');

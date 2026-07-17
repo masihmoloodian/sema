@@ -27,7 +27,7 @@ sema init --codex --uninstall
 
 This removes the `[mcp_servers.sema]` block from `.codex/config.toml`.
 
-To deregister from **every** detected CLI at once (Claude Code, Codex, opencode), use `sema setup --uninstall` — `sema init` targets only one client and has no `--opencode` flag.
+To deregister from **every** detected CLI at once (Claude Code, Codex, opencode, Grok Build), use `sema setup --uninstall` — `sema init` targets only one client and has no `--opencode` flag.
 
 ## Update sema to the latest version
 
@@ -55,7 +55,7 @@ Your existing project indexes are untouched — no need to re-run `sema index .`
 ## Fully remove sema from your machine
 
 ```bash
-# 1. Deregister from every detected AI CLI (Claude Code, Codex, opencode)
+# 1. Deregister from every detected AI CLI (Claude Code, Codex, opencode, Grok Build)
 cd your-project && sema setup --uninstall
 
 # 2. Uninstall the sema binary — match how you installed it

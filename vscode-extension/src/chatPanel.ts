@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import * as path from 'path';
 import { SemaClient, SessionUsage, SearchResult } from './semaClient';
 import { ChatMessage, PROVIDERS, getProvider } from './providers';
+import { parseSignedIn } from './providers/cli';
 import {
   AgentPermissionMode,
   Attachment,
@@ -34,6 +35,10 @@ const INDEX_KEY = 'sema.chat.useIndex';
 const REDACT_KEY = 'sema.chat.redact';
 const EFFORT_KEY = 'sema.chat.effort';
 const PERMISSION_KEY = 'sema.chat.permissions';
+/** How long to keep polling for a launched login to finish (browser round-trip). */
+const LOGIN_WATCH_MS = 3 * 60 * 1000;
+/** Floor between on-focus sign-in re-probes, so window switching can't spam the CLI. */
+const AUTH_PROBE_THROTTLE_MS = 5_000;
 const CUSTOM_MODELS_KEY = 'sema.chat.customModels';
 const RESOLVED_DEFAULT_KEY = 'sema.chat.resolvedDefault';
 // Per-workspace pointer to the session to reopen on the next launch (survives restart).
@@ -61,6 +66,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private controller?: AbortController;
   private loginTerm?: vscode.Terminal;
+  /** In-flight `watchLogin` poll: its timer, and the provider it is waiting on. */
+  private loginWatchTimer?: ReturnType<typeof setTimeout>;
+  private loginWatchProvider?: string;
+  /** Last known sign-in verdict per provider id — gates the on-focus re-probe. */
+  private readonly authState = new Map<string, boolean>();
+  private lastAuthProbe = 0;
   /** Capabilities are keyed by provider + configured executable, so path changes re-probe. */
   private readonly effortCapabilities = new Map<string, EffortCapabilities>();
   private readonly effortDiscoveries = new Map<string, Promise<EffortCapabilities>>();
@@ -253,6 +264,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (this.view === view) {
         this.view = undefined;
         this.cancelPermissions();
+        this.stopLoginWatch();
       }
     });
     // Re-check sign-in state when the panel regains focus (e.g. after logging in
@@ -268,6 +280,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         void this.refreshAuthState();
       }
     });
+    // Coming back to VS Code is the moment a sign-in done elsewhere (another terminal,
+    // the browser) has just finished. Only re-probe while we believe this provider is
+    // signed out: that is the only direction the answer can move on its own, and each
+    // probe shells out to the CLI. Throttled so rapid window switching can't spam it.
+    vscode.window.onDidChangeWindowState((s) => {
+      if (!s.focused || !this.believesSignedOut()) {
+        return;
+      }
+      const now = Date.now();
+      if (now - this.lastAuthProbe < AUTH_PROBE_THROTTLE_MS) {
+        return;
+      }
+      this.lastAuthProbe = now;
+      void this.refreshAuthState();
+    });
+  }
+
+  /** True when the active provider can sign in and last reported that it had not. */
+  private believesSignedOut(): boolean {
+    const provider = getProvider(this.providerId);
+    return !!provider.auth && this.authState.get(provider.id) === false;
   }
 
   /** "New chat" — save the current session (if it has content), then start a fresh one. */
@@ -442,6 +475,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (provider.id === 'opencode') {
       return cfg.get<string>('chat.opencodePath') || 'opencode';
     }
+    if (provider.id === 'grok') {
+      return cfg.get<string>('chat.grokPath') || 'grok';
+    }
     return provider.id;
   }
 
@@ -529,10 +565,59 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.loginTerm = term;
     term.show();
     term.sendText(`"${bin}" ${this.authArgs(provider, provider.auth.login).join(' ')}`);
+    this.watchLogin(provider.id);
     this.view?.webview.postMessage({
       type: 'notice',
-      text: `Opened a terminal to sign in to ${provider.label}. Finish in your browser, then send your message again.`,
+      text: `Opened a terminal to sign in to ${provider.label}. The panel updates on its own once you're signed in.`,
     });
+  }
+
+  private stopLoginWatch(): void {
+    if (this.loginWatchTimer) {
+      clearTimeout(this.loginWatchTimer);
+      this.loginWatchTimer = undefined;
+    }
+    this.loginWatchProvider = undefined;
+  }
+
+  /**
+   * Poll sign-in state until the login we just launched lands.
+   *
+   * The login runs in a terminal we don't own: the CLI leaves it open at the shell
+   * prompt afterwards, and the panel usually stays visible the whole time, so neither
+   * onDidCloseTerminal nor a visibility change fires. Without this the header keeps
+   * saying "Sign in" at an already signed-in user until the window is reloaded.
+   *
+   * Polls fast at first (the CLI may already hold a valid token), then backs off, since
+   * each tick shells out — and for some CLIs that is a network call. Gives up after a
+   * few minutes; the visibility and terminal-close triggers still cover a late finish.
+   */
+  private watchLogin(providerId: string): void {
+    this.stopLoginWatch();
+    this.loginWatchProvider = providerId;
+    const startedAt = Date.now();
+    const tick = async (): Promise<void> => {
+      // A newer login, a provider switch, or a disposed view supersedes this watch.
+      if (this.loginWatchProvider !== providerId || this.providerId !== providerId || !this.view) {
+        this.stopLoginWatch();
+        return;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (await this.refreshAuthState()) {
+        this.stopLoginWatch();
+        this.view?.webview.postMessage({
+          type: 'notice',
+          text: `Signed in to ${getProvider(providerId).label}.`,
+        });
+        return;
+      }
+      if (elapsed > LOGIN_WATCH_MS) {
+        this.stopLoginWatch();
+        return;
+      }
+      this.loginWatchTimer = setTimeout(() => void tick(), elapsed < 30_000 ? 2_000 : 5_000);
+    };
+    this.loginWatchTimer = setTimeout(() => void tick(), 2_000);
   }
 
   private async logout(): Promise<void> {
@@ -544,6 +629,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (ok !== 'Sign out') {
       return;
     }
+    // A signing-out user has abandoned any login we were polling for; letting it run
+    // would race this logout and could flip the header back to "signed in".
+    this.stopLoginWatch();
     try {
       await execFileAsync(this.cliBinFor(provider), this.authArgs(provider, provider.auth.logout), {
         cwd: this.repoRoot || undefined,
@@ -555,16 +643,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     await this.refreshAuthState();
   }
 
-  /** Ask the provider CLI whether it's signed in, and update the panel's Login button. */
-  private async refreshAuthState(): Promise<void> {
+  /**
+   * Ask the provider CLI whether it's signed in, and update the panel's Login button.
+   * Returns the verdict so a caller can stop polling once sign-in lands.
+   */
+  private async refreshAuthState(): Promise<boolean> {
     const view = this.view;
     if (!view) {
-      return;
+      return false;
     }
     const provider = getProvider(this.providerId);
+    // Stamp the provider on the reply: this resolves asynchronously, so the user may
+    // have switched by the time it lands, and the webview drops verdicts for others.
     if (!provider.auth) {
-      view.webview.postMessage({ type: 'auth', canLogin: false });
-      return;
+      view.webview.postMessage({ type: 'auth', provider: provider.id, canLogin: false });
+      return false;
     }
     let loggedIn = false;
     try {
@@ -575,23 +668,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         cwd: this.repoRoot || undefined,
         },
       );
-      const out = stdout.trim();
-      try {
-        // Claude Code prints JSON: { "loggedIn": true, ... }
-        const j = JSON.parse(out) as { loggedIn?: boolean };
-        loggedIn =
-          typeof j.loggedIn === 'boolean'
-            ? j.loggedIn
-            : !/not\s+logged\s*in|not\s+authenticated|logged\s+out/i.test(out);
-      } catch {
-        // Codex prints plain text ("Not logged in" when signed out).
-        loggedIn = !/not\s+logged\s*in|not\s+authenticated|logged\s+out|no\s+credentials/i.test(out);
-      }
+      loggedIn = parseSignedIn(stdout);
     } catch {
       // Non-zero exit (or CLI not found) — treat as not signed in.
       loggedIn = false;
     }
-    view.webview.postMessage({ type: 'auth', canLogin: true, loggedIn });
+    this.authState.set(provider.id, loggedIn);
+    view.webview.postMessage({ type: 'auth', provider: provider.id, canLogin: true, loggedIn });
+    return loggedIn;
   }
 
   /** Ensure the index exists and matches current source hashes. */
@@ -810,6 +894,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.deleteSession(String(msg.id ?? ''));
         break;
       case 'setProvider':
+        // Any login we were waiting on belongs to the provider being left.
+        this.stopLoginWatch();
         await this.context.globalState.update(PROVIDER_KEY, String(msg.provider));
         await this.context.globalState.update(MODEL_KEY, undefined);
         await this.sendConfig();
@@ -1116,6 +1202,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       cliBin = cfg.get<string>('chat.codexPath');
     } else if (provider.id === 'opencode') {
       cliBin = cfg.get<string>('chat.opencodePath');
+    } else if (provider.id === 'grok') {
+      cliBin = cfg.get<string>('chat.grokPath');
     }
 
     // A provider/model/mode switch keeps the sema transcript but starts a compatible
@@ -1318,6 +1406,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #brand svg { width: 18px; height: 18px; color: var(--vscode-foreground); }
   #brand .name { font-size: 13px; letter-spacing: .3px; }
   #modelinfo { flex: 1; text-align: right; font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Sign-in / API-key warning. Hidden unless the active provider can't send. */
+  #authnotice { display: none; align-items: center; gap: 5px; flex: none; padding: 2px 8px; border-radius: 10px; font-size: 11px; cursor: pointer;
+    color: var(--vscode-inputValidation-warningForeground, var(--vscode-editorWarning-foreground));
+    background: var(--vscode-inputValidation-warningBackground, transparent);
+    border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-editorWarning-foreground)); }
+  #authnotice.show { display: inline-flex; }
+  #authnotice:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+  #authnotice svg { width: 12px; height: 12px; flex: none; }
   .iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--vscode-foreground); cursor: pointer; opacity: .75; flex: none; }
   .iconbtn:hover { background: var(--vscode-list-hoverBackground); opacity: 1; }
 
@@ -1454,6 +1550,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="header">
     <span id="brand"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0.4" stroke-linejoin="round"><path d="M8.06 3.83 L22.00 3.83 L17.55 8.38 L16.37 9.46 L14.92 9.92 L2.40 9.92 L2.23 9.63 L2.79 7.95 L4.01 6.00 L5.82 4.52 L8.03 3.86 Z"></path><path d="M10.60 12.43 L21.01 12.43 L21.14 13.25 L20.65 15.23 L19.00 17.93 L17.26 19.31 L14.82 20.14 L2.00 20.17 L8.92 13.15 L10.57 12.46 Z"></path></svg><span class="name">sema</span></span>
     <span id="modelinfo" title="Selected model id (→ marks the model a local CLI actually used)"></span>
+    <span id="authnotice" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><path d="M12 9v4M12 17h.01"></path></svg><span class="txt"></span></span>
     <button id="history" class="iconbtn" title="Chat history"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"></path><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path><path d="M12 7v5l4 2"></path></svg></button>
     <button id="clear" class="iconbtn" title="New chat (current chat is saved to history)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
   </div>
@@ -1505,12 +1602,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var permissionPill = document.getElementById('permissionpill');
     var modelPill = document.getElementById('modelpill');
     var modelInfo = document.getElementById('modelinfo');
+    var authNotice = document.getElementById('authnotice');
     // Single source of truth for every composer control — the pills and popover
     // menus are rebuilt from this on each 'config' / 'auth' message.
     var state = {
       providers: [], provider: '', model: 'default', mode: 'agent', effort: 'default', permission: 'ask',
       defaults: {}, useIndex: false, redact: false,
       requiresKey: false, hasKey: false, canLogin: false, loggedIn: false,
+      // Provider id the loggedIn verdict was resolved for. Sign-in state is discovered
+      // by running the CLI, so it lands one message after 'config' — until this matches
+      // the active provider we don't know it, and must not tell someone who is signed
+      // in to sign in. Keyed by provider (not a bare pending flag) so a re-sent
+      // 'config' for the same provider keeps the verdict we already have.
+      authFor: '',
     };
     function providerOf(id){ for (var i=0;i<state.providers.length;i++){ if (state.providers[i].id === id) return state.providers[i]; } return null; }
     function effortsFor(p, model){
@@ -1535,7 +1639,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       modePill.querySelector('.cap').textContent = modeLabel();
       var activeProvider = providerOf(state.provider);
       var cap = modelPill.querySelector('.cap'); cap.textContent = modelLabel();
-      var needs = (state.requiresKey && !state.hasKey) || (state.canLogin && !state.loggedIn);
+      var needs = (state.requiresKey && !state.hasKey)
+        || (state.canLogin && state.authFor === state.provider && !state.loggedIn);
       var hasPermissionControl = activeProvider && activeProvider.permissionModes && activeProvider.permissionModes.length;
       var fullAccess = state.permission === 'bypass';
       permissionPill.style.display = state.mode === 'agent' && hasPermissionControl ? 'inline-flex' : 'none';
@@ -1549,7 +1654,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       modelPill.title = needs
         ? (state.requiresKey && !state.hasKey ? 'Set an API key to send' : 'Sign in to send')
         : (activeProvider ? activeProvider.label + ' · ' : '') + 'Model: ' + modelIdOf(state.model) + (state.effort !== 'default' ? ' · Effort: ' + state.effort : '');
+      refreshAuthNotice(activeProvider, needs);
       showSelectedModel(state.model);
+    }
+    // Surface "can't send yet" in the header, where it is visible before the user
+    // types — the model pill only reveals it once its menu is open. Naming the
+    // provider matters: the reason is per-provider, and switching provider changes it.
+    function refreshAuthNotice(activeProvider, needs){
+      // Plain split, not a regex: this script is emitted from a template literal, so a
+      // backslash escape here silently becomes something else by the time it runs.
+      var name = activeProvider ? activeProvider.label.split(' (local)')[0] : 'this provider';
+      var keyMissing = state.requiresKey && !state.hasKey;
+      authNotice.classList.toggle('show', !!needs);
+      if (!needs) return;
+      authNotice.querySelector('.txt').textContent = keyMissing ? 'Set API key' : 'Sign in';
+      authNotice.title = keyMissing
+        ? name + ' needs an API key before it can answer — click to set it.'
+        : 'Not signed in to ' + name + ' — click to sign in with its own CLI.';
     }
     var composerEl = document.getElementById('composer');
     var chipsEl = document.getElementById('chips');
@@ -1901,6 +2022,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           action: function(){ state.permission = 'bypass'; refreshPills(); vscode.postMessage({type:'setPermission', permission:'bypass'}); } },
       ]);
     });
+    // The notice is the shortcut for whichever step is actually missing.
+    function runAuthNoticeAction(){
+      vscode.postMessage({ type: (state.requiresKey && !state.hasKey) ? 'setKey' : 'login' });
+    }
+    authNotice.addEventListener('click', runAuthNoticeAction);
+    authNotice.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); runAuthNoticeAction(); }
+    });
     document.getElementById('clear').addEventListener('click', function(){ vscode.postMessage({type:'clear'}); });
 
     // ── history browser (session list overlay) ──
@@ -1992,7 +2121,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       else if (m.type === 'historyClose'){ closeHistory(); }
       else if (m.type === 'model'){ modelInfo.textContent = '→ ' + m.model; }
       else if (m.type === 'notice'){ hideEmpty(); var nt=document.createElement('div'); nt.className='notice'; nt.textContent = m.text; messagesEl.appendChild(nt); messagesEl.scrollTop = messagesEl.scrollHeight; }
-      else if (m.type === 'auth'){ state.canLogin = !!m.canLogin; state.loggedIn = m.canLogin ? !!m.loggedIn : false; refreshPills(); }
+      else if (m.type === 'auth'){
+        // Ignore a verdict that raced a provider switch — it describes the old one.
+        if (m.provider && m.provider !== state.provider) return;
+        state.canLogin = !!m.canLogin; state.loggedIn = m.canLogin ? !!m.loggedIn : false;
+        state.authFor = m.provider || state.provider;
+        refreshPills();
+      }
     });
 
     setStreaming(false);

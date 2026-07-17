@@ -28,7 +28,7 @@ You can pass `--root` more than once if your projects live under several parents
 sema init --claude --root ~/work --root ~/oss
 ```
 
-To register every detected AI CLI (Claude Code, Codex, opencode) at a root in one shot, use `sema setup` instead of `sema init`:
+To register every detected AI CLI (Claude Code, Codex, opencode, Grok Build) at a root in one shot, use `sema setup` instead of `sema init`:
 
 ```bash
 sema setup --root ~/code

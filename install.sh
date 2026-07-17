@@ -6,8 +6,9 @@
 # What it does:
 #   1. Ensures `uv` is available (bootstraps the official installer if missing).
 #   2. Installs the `sema` binary in an isolated tool environment (uv tool install).
-#   3. Detects which AI CLIs you have (Claude Code, Codex, opencode) and, if this
-#      is run inside an indexed project, registers sema with each via `sema setup`.
+#   3. Detects which AI CLIs you have (Claude Code, Codex, opencode, Grok Build)
+#      and, if this is run inside an indexed project, registers sema with each
+#      via `sema setup`.
 #
 # Nothing here needs sudo. Everything installs under your home directory.
 #
@@ -15,6 +16,7 @@
 #   SEMA_SKIP_CLAUDE=1     don't register with Claude Code
 #   SEMA_SKIP_CODEX=1      don't register with Codex
 #   SEMA_SKIP_OPENCODE=1   don't register with opencode
+#   SEMA_SKIP_GROK=1       don't register with Grok Build
 #   SEMA_NO_SETUP=1        install the binary only; skip all registration
 #   SEMA_YES=1             assume "yes" to every prompt (non-interactive)
 #   SEMA_PACKAGE=<spec>    install source instead of PyPI's sema-mcp — e.g. a
@@ -110,7 +112,7 @@ else
   say ""
   say "${BOLD}Detected AI CLIs:${RESET}"
   found_any=0
-  for tool in claude codex opencode; do
+  for tool in claude codex opencode grok; do
     if have "$tool"; then ok "$tool"; found_any=1; else info "$tool ${DIM}(not installed)${RESET}"; fi
   done
 
@@ -120,6 +122,7 @@ else
     say "    ${DIM}Claude Code${RESET}  https://github.com/anthropics/claude-code"
     say "    ${DIM}Codex${RESET}        https://github.com/openai/codex"
     say "    ${DIM}opencode${RESET}     https://opencode.ai"
+    say "    ${DIM}Grok Build${RESET}   https://x.ai/cli"
   elif [ -d ".sema/index" ]; then
     say ""
     if confirm "Register sema with the detected CLIs for this project?"; then

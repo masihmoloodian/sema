@@ -3,8 +3,15 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider, isClaudeProtectedTool } from './cli';
-import { StreamOptions } from './types';
+import {
+  ClaudeCodeProvider,
+  CodexProvider,
+  GrokProvider,
+  OpenCodeProvider,
+  isClaudeProtectedTool,
+  parseSignedIn,
+} from './cli';
+import { StreamOptions, TokenUsage } from './types';
 
 class InspectClaude extends ClaudeCodeProvider {
   invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
@@ -13,6 +20,9 @@ class InspectCodex extends CodexProvider {
   invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
 }
 class InspectOpenCode extends OpenCodeProvider {
+  invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
+}
+class InspectGrok extends GrokProvider {
   invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
 }
 
@@ -49,14 +59,14 @@ function options(cliBin: string): {
   activities: string[];
   sessions: string[];
   models: string[];
-  usage: Array<{ inputTokens: number; outputTokens: number }>;
+  usage: TokenUsage[];
 } {
   const deltas: string[] = [];
   const thinking: string[] = [];
   const activities: string[] = [];
   const sessions: string[] = [];
   const models: string[] = [];
-  const usage: Array<{ inputTokens: number; outputTokens: number }> = [];
+  const usage: TokenUsage[] = [];
   return {
     opts: {
       model: 'default',
@@ -135,6 +145,187 @@ test('opencode JSON stream reports answer, reasoning, tools, session, and usage'
   assert.deepEqual(state.usage, [{ inputTokens: 12, outputTokens: 5, cachedInputTokens: 2, costUsd: 0.02 }]);
 });
 
+// Verbatim from `grok --output-format streaming-json ... -p "Reply with exactly: ok"`
+// against grok 0.2.102 on a signed-in account. Note what real output settles:
+//   * total_tokens (4947) == input_tokens + cache_read_input_tokens + output_tokens,
+//     so reasoning_tokens is already inside output_tokens and must not be added again.
+//   * no total_cost_usd at all — OAuth/pool traffic goes uncosted.
+//   * modelUsage is keyed by the billed id, which is not the id that was requested.
+const GROK_LIVE_END = {
+  type: 'end',
+  stopReason: 'EndTurn',
+  sessionId: '019f6f62-ec91-77d0-a586-44188d1e9e1e',
+  requestId: 'de171208-08b7-4f4b-81cf-a998a52a0ced',
+  usage: {
+    input_tokens: 4925,
+    cache_read_input_tokens: 0,
+    output_tokens: 22,
+    reasoning_tokens: 21,
+    total_tokens: 4947,
+  },
+  num_turns: 1,
+  modelUsage: {
+    'grok-4.5-build-free': {
+      inputTokens: 4925, outputTokens: 22, cacheReadInputTokens: 0, modelCalls: 1,
+    },
+  },
+};
+
+test('Grok streaming-json reports answer, reasoning, session, model, and usage', async () => {
+  const cli = await fakeCli([
+    { type: 'thought', data: 'The' },
+    { type: 'thought', data: ' user' },
+    { type: 'text', data: 'ok' },
+    GROK_LIVE_END,
+  ]);
+  const state = options(cli);
+  await new GrokProvider().stream(state.opts);
+  assert.deepEqual(state.deltas, ['ok']);
+  assert.deepEqual(state.thinking, ['The', ' user']);
+  assert.deepEqual(state.activities, []);  // grok's stream carries no tool events
+  assert.deepEqual(state.sessions, ['019f6f62-ec91-77d0-a586-44188d1e9e1e']);
+  // Resolved from modelUsage — the requested id was grok-4.5, the billed one is not.
+  assert.deepEqual(state.models, ['grok-4.5-build-free']);
+  assert.deepEqual(state.usage, [
+    // 4925 + 0 cache read; 22 out (NOT 22 + 21 reasoning); no cost reported.
+    { inputTokens: 4925, outputTokens: 22, cachedInputTokens: 0, costUsd: undefined },
+  ]);
+});
+
+test('Grok reports no cost when the CLI omits it rather than implying free', async () => {
+  const cli = await fakeCli([{ type: 'text', data: 'answer' }, GROK_LIVE_END]);
+  const state = options(cli);
+  await new GrokProvider().stream({ ...state.opts, onModel: undefined });
+  assert.equal(state.usage[0].costUsd, undefined);
+});
+
+test('Grok stays silent on the model when subagents make modelUsage ambiguous', async () => {
+  const cli = await fakeCli([
+    { type: 'text', data: 'answer' },
+    {
+      ...GROK_LIVE_END,
+      modelUsage: { 'grok-4.5-build-free': { modelCalls: 1 }, 'grok-4.20-multi-agent': { modelCalls: 2 } },
+    },
+  ]);
+  const state = options(cli);
+  await new GrokProvider().stream(state.opts);
+  // No marker says which entry is the main model, so guessing would mislabel the turn.
+  assert.deepEqual(state.models, []);
+});
+
+test('Grok surfaces a streamed error object', async () => {
+  const cli = await fakeCli([{ type: 'error', message: "Couldn't start session: not signed in" }]);
+  const state = options(cli);
+  await assert.rejects(
+    new GrokProvider().stream({ ...state.opts, onModel: undefined }),
+    /not signed in/,
+  );
+});
+
+test('Grok passes the prompt to -p and gates tools by mode', () => {
+  const grok = new InspectGrok();
+
+  const ask = grok.invocation({ ...baseOptions(), model: 'default' });
+  assert.equal(ask.bin, 'grok');
+  assert.deepEqual(ask.args.slice(0, 2), ['--output-format', 'streaming-json']);
+  // The base class appends the prompt positional, so `-p` must be the final flag.
+  assert.equal(ask.args[ask.args.length - 1], '-p');
+  assert.ok(ask.args.includes('--tools'), 'Ask mode must stay read-only');
+  assert.ok(!ask.args.includes('--yolo'));
+  assert.ok(ask.prompt.includes('hello'));
+
+  const agent = grok.invocation({ ...baseOptions(), agent: true, model: 'grok-4.5', effort: 'high' });
+  assert.ok(agent.args.includes('--yolo'), 'Agent mode must auto-approve or it hangs headless');
+  assert.ok(!agent.args.includes('--tools'));
+  assert.deepEqual(agent.args.slice(agent.args.indexOf('-m'), agent.args.indexOf('-m') + 2), ['-m', 'grok-4.5']);
+  assert.deepEqual(
+    agent.args.slice(agent.args.indexOf('--effort'), agent.args.indexOf('--effort') + 2),
+    ['--effort', 'high'],
+  );
+
+  // 'default' effort/model means "pass no flag and let grok decide".
+  assert.ok(!ask.args.includes('--effort'));
+  assert.ok(!ask.args.includes('-m'));
+
+  // Resume sends only the newest turn; the grok session holds the rest.
+  const resumed = grok.invocation({
+    ...baseOptions(),
+    sessionId: 'sess-1',
+    messages: [
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'reply' },
+      { role: 'user', content: 'second' },
+    ],
+  });
+  assert.deepEqual(resumed.args.slice(resumed.args.indexOf('-r'), resumed.args.indexOf('-r') + 2), ['-r', 'sess-1']);
+  assert.equal(resumed.prompt, 'second');
+});
+
+test('sign-in state is read from each CLI real output', () => {
+  // Claude Code — JSON.
+  assert.equal(parseSignedIn('{"loggedIn":true}'), true);
+  assert.equal(parseSignedIn('{"loggedIn":false}'), false);
+
+  // Codex — prose.
+  assert.equal(parseSignedIn('Not logged in'), false);
+  assert.equal(parseSignedIn('Logged in using ChatGPT'), true);
+
+  // Grok — `grok models` exits 0 either way, so the prose is the only signal. Both
+  // strings are verbatim from grok 0.2.102, captured signed out and signed in.
+  assert.equal(
+    parseSignedIn('You are not authenticated.\n\nDefault model: grok-build\n\nAvailable models:'),
+    false,
+  );
+  assert.equal(
+    parseSignedIn(
+      'You are logged in with grok.com.\n\nDefault model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)',
+    ),
+    true,
+  );
+
+  // A model list that merely mentions the word must not read as signed out.
+  assert.equal(parseSignedIn('Available models:\n  auth-helper-v2'), true);
+});
+
+test('CLIs with a system channel keep the user turn free of sema context', () => {
+  const sys = 'SEMA CONTEXT: use search_code first.';
+  const opts = { ...baseOptions(), system: sys, messages: [{ role: 'user' as const, content: 'hi' }] };
+
+  // Claude Code — --append-system-prompt, matching what its Agent SDK path already does.
+  const claude = new InspectClaude().invocation(opts);
+  assert.deepEqual(
+    claude.args.slice(claude.args.indexOf('--append-system-prompt'), claude.args.indexOf('--append-system-prompt') + 2),
+    ['--append-system-prompt', sys],
+  );
+  assert.equal(claude.prompt, 'hi', 'the user turn must be exactly what they typed');
+
+  // Grok — --rules appends to the system prompt (verified against grok 0.2.102).
+  const grok = new InspectGrok().invocation(opts);
+  assert.deepEqual(
+    grok.args.slice(grok.args.indexOf('--rules'), grok.args.indexOf('--rules') + 2),
+    ['--rules', sys],
+  );
+  assert.equal(grok.prompt, 'hi');
+
+  // No system to send → no empty flag.
+  const bare = new InspectGrok().invocation({ ...opts, system: '' });
+  assert.ok(!bare.args.includes('--rules'));
+  assert.ok(!new InspectClaude().invocation({ ...opts, system: '' }).args.includes('--append-system-prompt'));
+});
+
+test('CLIs without a system channel inline it, but fence off the user request', () => {
+  const sys = 'SEMA CONTEXT: use search_code first.';
+  const opts = { ...baseOptions(), system: sys, messages: [{ role: 'user' as const, content: 'hi' }] };
+
+  // Codex's positional IS its instructions and `opencode run` has no system flag, so
+  // inlining is forced here — not an oversight. The fence keeps the request legible.
+  for (const invocation of [new InspectCodex().invocation(opts), new InspectOpenCode().invocation(opts)]) {
+    assert.ok(invocation.prompt.startsWith(sys), 'context leads');
+    assert.ok(invocation.prompt.includes('End of context'), 'boundary is marked');
+    assert.ok(invocation.prompt.trimEnd().endsWith('hi'), 'user request comes last');
+  }
+});
+
 test('provider stream surfaces structured model errors', async () => {
   const cli = await fakeCli([
     { type: 'result', is_error: true, result: 'not authenticated' },
@@ -152,7 +343,12 @@ test('Claude Code maps Ask, Plan, and Agent to distinct capabilities', () => {
     agent: true,
     permissionMode: 'bypass',
   }).args;
-  assert.deepEqual(ask.slice(ask.indexOf('--tools')), ['--tools', '', '--model', 'test-model']);
+  // baseOptions() carries system: 'system', which now rides --append-system-prompt
+  // rather than being inlined into the user's turn.
+  assert.deepEqual(
+    ask.slice(ask.indexOf('--tools')),
+    ['--tools', '', '--model', 'test-model', '--append-system-prompt', 'system'],
+  );
   assert.ok(plan.includes('plan'));
   assert.ok(!plan.includes('--dangerously-skip-permissions'));
   assert.ok(agent.includes('--dangerously-skip-permissions'));

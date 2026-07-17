@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh
 ```bash
 cd your-project
 sema index .     # build the local semantic index
-sema setup       # register with every detected CLI: Claude Code, Codex, opencode
+sema setup       # register with every detected CLI: Claude Code, Codex, opencode, Grok Build
 ```
 
 Keep the local coding-agent CLIs current so newly released models and effort

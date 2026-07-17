@@ -32,9 +32,10 @@ environment variables it honours are the installer-set skip flags for
 SEMA_SKIP_CLAUDE      Set to 1 to skip Claude Code during `sema setup`
 SEMA_SKIP_CODEX       Set to 1 to skip OpenAI Codex during `sema setup`
 SEMA_SKIP_OPENCODE    Set to 1 to skip opencode during `sema setup`
+SEMA_SKIP_GROK        Set to 1 to skip Grok Build during `sema setup`
 ```
 
-These mirror the `--skip-claude` / `--skip-codex` / `--skip-opencode` flags and
+These mirror the `--skip-claude` / `--skip-codex` / `--skip-opencode` / `--skip-grok` flags and
 exist so the one-line installer can register only the clients you want. See the
 [CLI reference](cli-reference.md).
 

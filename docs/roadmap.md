@@ -3,7 +3,7 @@
 Phase 1 is complete and Phase 2 is in progress. Already shipped and live: all 8
 MCP tools, multi-project serving (`sema init --root`), the [reuse guard](../sema/reuse.py)
 (`check_reuse` / `sema reuse`), incremental indexing, the file watcher, and the
-[VS Code extension](../vscode-extension/README.md) (chat + agent panel across 8
+[VS Code extension](../vscode-extension/README.md) (chat + agent panel across 9
 providers). This roadmap tracks what's next.
 
 ## v0.2 — Tool improvements
@@ -33,6 +33,7 @@ providers). This roadmap tracks what's next.
 
 ## v1.0 — Public release
 - [x] Publish to PyPI (`sema-mcp`) with a `curl | sh` one-line installer
+- [x] Auto-detect and configure Grok Build (`sema init --grok`, `.grok/config.toml`, chat provider)
 - [ ] Homebrew formula
 - [ ] Auto-detect and configure Cursor, Copilot, Windsurf
 - [ ] Token savings report after each index

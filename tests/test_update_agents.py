@@ -23,7 +23,25 @@ def test_update_check_reports_every_installed_provider(monkeypatch):
         (["/bin/claude", "--version"], False),
         (["/bin/codex", "--version"], False),
         (["/bin/opencode", "--version"], False),
+        (["/bin/grok", "--version"], False),
     ]
+
+
+def test_update_uses_grok_self_updater(monkeypatch):
+    calls = []
+    monkeypatch.setattr("sema.cli.shutil.which", lambda name: f"/bin/{name}")
+
+    class Result:
+        returncode = 0
+
+    def run(args, check):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr("sema.cli.subprocess.run", run)
+    result = CliRunner().invoke(main, ["update", "--provider", "grok"])
+    assert result.exit_code == 0
+    assert calls == [["/bin/grok", "update"]]  # not `upgrade` — that's opencode's verb
 
 
 def test_update_can_target_one_provider(monkeypatch):

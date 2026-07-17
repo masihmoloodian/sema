@@ -10,6 +10,7 @@ quick start, or [Why sema](why-sema.md) for the pitch.
 - [Claude Code setup](claude-code.md) — register sema, add `CLAUDE.md`
 - [OpenAI Codex setup](codex.md) — register sema, add `AGENTS.md`
 - [opencode setup](opencode.md) — install, use as a chat provider, add sema via MCP
+- [Grok Build setup](grok.md) — register sema, add `AGENTS.md`
 - [sema for VS Code](../vscode-extension/README.md) — the chat + agent extension
 - [Working with multiple projects](multi-project.md) — serve many repos from one registration
 - [VS Code workspace setup](vscode-workspace.md) — multi-folder workspaces

@@ -89,6 +89,10 @@ export class ManagePanel {
         description: status.registration.codex ? 'registered' : 'not registered',
       });
       items.push({
+        label: `$(${status.registration.grok ? 'check' : 'dash'}) Grok Build`,
+        description: status.registration.grok ? 'registered' : 'not registered',
+      });
+      items.push({
         label: `$(${this.isWatching() ? 'eye' : 'eye-closed'}) Watch`,
         description: this.isWatching() ? 'on' : 'off',
       });
@@ -106,7 +110,7 @@ export class ManagePanel {
     }
 
     // ── Actions ──────────────────────────────────────────────────────────────
-    const reg = status?.registration ?? { claude: false, codex: false };
+    const reg = status?.registration ?? { claude: false, codex: false, grok: false };
     items.push(sep('Actions'));
     items.push({ label: '$(database) Re-index', run: run('sema.manage.reindex') });
     items.push({ label: '$(debug-restart) Re-index (reset)', run: run('sema.manage.reindexReset') });
@@ -121,6 +125,11 @@ export class ManagePanel {
         : { label: '$(plug) Register with Codex', run: run('sema.manage.registerCodex') },
     );
     items.push(
+      reg.grok
+        ? { label: '$(circle-slash) Unregister Grok Build', run: run('sema.manage.unregisterGrok') }
+        : { label: '$(plug) Register with Grok Build', run: run('sema.manage.registerGrok') },
+    );
+    items.push(
       this.isWatching()
         ? { label: '$(debug-stop) Stop watching', run: run('sema.manage.watchToggle') }
         : { label: '$(eye) Watch files (auto-index)', run: run('sema.manage.watchToggle') },
@@ -128,7 +137,7 @@ export class ManagePanel {
     items.push({ label: '$(pulse) Run doctor', run: run('sema.manage.doctor') });
     items.push({
       label: '$(cloud-download) Update agent CLIs…',
-      description: 'Claude Code · Codex · opencode',
+      description: 'Claude Code · Codex · opencode · Grok Build',
       run: run('sema.manage.updateAgents'),
     });
 

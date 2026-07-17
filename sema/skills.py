@@ -40,12 +40,13 @@ class SkillInstall:
 def provider_skill_path(project_root: Path, provider: str) -> Path:
     """Return the project-local skill path used by a provider.
 
-    opencode discovers the open Agent Skills path as well as its native path, so
-    it shares `.agents/skills` with Codex and avoids duplicate skill entries.
+    opencode and Grok Build discover the open Agent Skills path as well as their
+    native ones, so they share `.agents/skills` with Codex and avoid duplicate
+    skill entries.
     """
     if provider == "claude":
         base = project_root / ".claude" / "skills"
-    elif provider in {"codex", "opencode"}:
+    elif provider in {"codex", "opencode", "grok"}:
         base = project_root / ".agents" / "skills"
     else:
         raise ValueError(f"Unsupported skill provider: {provider}")

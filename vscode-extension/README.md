@@ -56,19 +56,25 @@ You need **one**, and you can switch any time — even mid-conversation.
 panel → **Set key** → paste. Keys live in VS Code SecretStorage, never in
 settings. OpenRouter is one gateway to models from many providers.
 
-**B · Reuse a local CLI** — no key management at all; Claude Code and Codex use
-your existing subscription, opencode works with any provider you sign into.
+**B · Reuse a local CLI** — no key management at all; Claude Code, Codex, and
+Grok Build use your existing subscription, opencode works with any provider you
+sign into.
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash         # Claude Code
 curl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex
 curl -fsSL https://opencode.ai/install | bash          # opencode
+curl -fsSL https://x.ai/cli/install.sh | bash          # Grok Build
 ```
 
 Then click **Log in** on that provider in the panel — it runs the CLI's own
 sign-in. Install only what you'll use. If a CLI isn't on VS Code's PATH, set
-`sema.chat.claudePath` / `sema.chat.codexPath` / `sema.chat.opencodePath`.
-Setup guides: [Claude Code](../docs/claude-code.md) · [Codex](../docs/codex.md) · [opencode](../docs/opencode.md).
+`sema.chat.claudePath` / `sema.chat.codexPath` / `sema.chat.opencodePath` /
+`sema.chat.grokPath`.
+Setup guides: [Claude Code](../docs/claude-code.md) · [Codex](../docs/codex.md) · [opencode](../docs/opencode.md) · [Grok Build](../docs/grok.md).
+
+If the selected provider can't answer yet — no API key, or not signed in — the panel
+header says so and doubles as the shortcut to fix it.
 
 > **opencode** also needs a model: it uses the default from your `opencode`
 > config, or pick a `provider/model` slug via **"+ custom id…"** (run
@@ -120,14 +126,16 @@ so the agent greps and reads files like any other assistant.
   injects retrieved code as RAG context — useful for API providers, which can't
   read files themselves. The toggle is authoritative in every mode: when it is off,
   chat does not refresh, search, or inject the Sema index.
-- **Reasoning effort** — shown only for the two local CLIs that expose it. The
+- **Reasoning effort** — shown only for the local CLIs that expose it. The
   extension reads the configured executables at runtime: `claude --help` supplies
   Claude Code's levels, while `codex debug models` supplies Codex's model-specific
   levels. Current Claude Code offers default, low, medium, high, extra high, and
   max. Current Codex offers default through extra high on GPT-5.4, GPT-5.4 Mini,
   and GPT-5.5; adds max on GPT-5.6 Luna; and adds max plus ultra on GPT-5.6 Sol
   and Terra. Older Codex builds safely fall back to default, minimal, low, medium,
-  and high. `default` sends no override. API providers and opencode hide the
+  and high. Grok Build takes its `--effort` levels from a static list — default,
+  none, minimal, low, medium, high, and extra high — since it exposes no discovery
+  command. `default` sends no override. API providers and opencode hide the
   control because their CLIs do not expose this same effort contract.
 - **Agent permissions** — in **Agent** mode with Claude Code or Codex, use the
   dedicated shield control and choose **Require approval** (the default) or
@@ -155,7 +163,7 @@ so the agent greps and reads files like any other assistant.
   | Anthropic, OpenAI | ✅ | ✅ | ✅ |
   | Codex | ✅ | — | ✅ |
   | opencode, OpenRouter, Together | ✅¹ | ✅¹ | ✅ |
-  | DeepSeek | — | — | ✅ |
+  | DeepSeek, Grok Build | — | — | ✅ |
 
   ¹ Per model, since these are gateways. Pick a vision model (Claude, Gemini, GPT)
   to send images; text-only models like DeepSeek or GLM take text files only.

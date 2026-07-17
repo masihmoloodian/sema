@@ -33,7 +33,7 @@ codex --version   # verify
 cd /your/project
 sema index .
 
-# 2. Register sema with every AI CLI you have (Claude Code, Codex, opencode)
+# 2. Register sema with every AI CLI you have (Claude Code, Codex, opencode, Grok Build)
 sema setup
 #    Or register Codex only:  sema init --codex
 
