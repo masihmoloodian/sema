@@ -1,6 +1,6 @@
 [project]
 name = "sema-mcp"
-version = "0.7.0"
+version = "0.8.0"
 description = "Semantic codebase indexer and MCP server for Claude Code"
 authors = [{name = "Masih Moloodian", email = "masihmoloodian@gmail.com"}]
 readme = "README.md"
