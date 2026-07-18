@@ -302,6 +302,16 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
 
+    // Update sema itself (the sema-mcp package / `sema` CLI) to the latest release.
+    vscode.commands.registerCommand('sema.manage.updateSema', () => {
+      const terminal = vscode.window.createTerminal({ name: 'sema · update', cwd: workspaceRoot });
+      terminal.show();
+      terminal.sendText(`${shellQuote(binaryPath())} self-update`);
+      vscode.window.showInformationMessage(
+        'Updating sema… reload VS Code after it finishes to load the new version.',
+      );
+    }),
+
     vscode.commands.registerCommand('sema.manage.copyInstall', async () => {
       const cmd =
         'curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh';

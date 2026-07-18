@@ -149,6 +149,11 @@ export class ManagePanel {
       description: 'Claude Code · Codex · opencode · Grok Build',
       run: run('sema.manage.updateAgents'),
     });
+    items.push({
+      label: '$(cloud-download) Update sema',
+      description: 'the sema CLI / MCP server (sema-mcp)',
+      run: run('sema.manage.updateSema'),
+    });
 
     if (status?.index.exists) {
       const projectRoot = status.index.project || this.workspaceRoot;

@@ -86,6 +86,41 @@ def update_agents(providers: tuple[str, ...], check: bool) -> None:
         console.print("\n[green]✔[/green] Agent CLI updates finished. Restart active agent sessions and reload the extension to refresh models.")
 
 
+@main.command(name="self-update")
+def self_update() -> None:
+    """Update sema itself (the sema-mcp package) to the latest PyPI release.
+
+    Picks the upgrade path for however sema was installed — `uv tool upgrade` (the
+    one-liner installer's method), then pipx, then pip. Reload the extension or
+    restart your agent afterward to load the new version.
+    """
+    import sys
+
+    uv = shutil.which("uv")
+    if uv and "sema-mcp" in subprocess.run(
+        [uv, "tool", "list"], capture_output=True, text=True, check=False
+    ).stdout:
+        cmd = [uv, "tool", "upgrade", "sema-mcp"]
+    elif (pipx := shutil.which("pipx")) and "sema-mcp" in subprocess.run(
+        [pipx, "list"], capture_output=True, text=True, check=False
+    ).stdout:
+        cmd = [pipx, "upgrade", "sema-mcp"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "sema-mcp"]
+
+    console.print(f"[bold]Updating sema[/bold]  [dim]{' '.join(cmd)}[/dim]")
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"Update failed (exit {result.returncode}). Re-run the installer:\n"
+            "  curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh"
+        )
+    console.print(
+        "\n[green]✔[/green] sema updated. Reload the sema extension (or restart your "
+        "agent) to load the new version."
+    )
+
+
 @main.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--workspace", type=click.Path(exists=True), help="VS Code .code-workspace file — index only its listed folders")

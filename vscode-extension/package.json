@@ -108,6 +108,11 @@
         "command": "sema.manage.updateAgents",
         "title": "sema: Update agent CLIs",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "sema.manage.updateSema",
+        "title": "sema: Update sema",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {

@@ -56,3 +56,41 @@ def test_every_provider_has_a_curl_installer():
     for name, spec in _AGENT_CLIS.items():
         assert spec["install"].startswith("curl "), name
         assert "install" in spec["install"], name
+
+
+def test_self_update_prefers_uv_tool(monkeypatch):
+    monkeypatch.setattr("sema.cli.shutil.which", lambda name: "/bin/uv" if name == "uv" else None)
+    calls = []
+
+    class Result:
+        def __init__(self, stdout="", returncode=0):
+            self.stdout, self.returncode = stdout, returncode
+
+    def run(cmd, **kwargs):
+        if cmd[:3] == ["/bin/uv", "tool", "list"]:
+            return Result(stdout="sema-mcp v0.6.0 (installed)")  # sema-mcp is a uv tool
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr("sema.cli.subprocess.run", run)
+    result = CliRunner().invoke(main, ["self-update"])
+    assert result.exit_code == 0, result.output
+    assert calls == [["/bin/uv", "tool", "upgrade", "sema-mcp"]]
+
+
+def test_self_update_falls_back_to_pip(monkeypatch):
+    monkeypatch.setattr("sema.cli.shutil.which", lambda name: None)  # no uv, no pipx
+    calls = []
+
+    class Result:
+        stdout = ""
+        returncode = 0
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr("sema.cli.subprocess.run", run)
+    result = CliRunner().invoke(main, ["self-update"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1][1:] == ["-m", "pip", "install", "--upgrade", "sema-mcp"]
