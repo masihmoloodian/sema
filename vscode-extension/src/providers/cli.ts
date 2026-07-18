@@ -943,6 +943,14 @@ export class CodexProvider extends CliProvider {
       }
     });
     const abort = (): void => {
+      // Reject any in-flight request (initialize / thread-start / turn-start) so an
+      // `await request(...)` in the setup phase unblocks. Without this, aborting before
+      // streaming begins hangs forever: the code is awaiting a request that never
+      // settles, so the `finally` that drains `pending` and returns never runs.
+      for (const waiter of pending.values()) {
+        waiter.reject(new Error('Aborted by the user.'));
+      }
+      pending.clear();
       child.kill();
       complete();
     };
