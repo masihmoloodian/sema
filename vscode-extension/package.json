@@ -60,6 +60,11 @@
         "icon": "$(git-compare)"
       },
       {
+        "command": "sema.chat.open",
+        "title": "sema: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "sema.chat.setKey",
         "title": "sema: Set chat API key",
         "icon": "$(key)"

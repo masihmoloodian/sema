@@ -253,6 +253,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('sema.chat.setKey', () => chatProvider.promptForKey()),
     vscode.commands.registerCommand('sema.chat.clear', () => chatProvider.clearConversation()),
+    // "sema: Open Chat" in the command palette — reveals the sidebar chat view.
+    // `semaChat.focus` is auto-registered by VS Code for the contributed view and
+    // resolves it on first open, so this works even before the panel is created.
+    vscode.commands.registerCommand('sema.chat.open', () =>
+      vscode.commands.executeCommand('semaChat.focus'),
+    ),
     // Explorer context menu passes (clickedUri, selectedUris); the palette passes neither,
     // in which case fall back to the native picker.
     vscode.commands.registerCommand(
