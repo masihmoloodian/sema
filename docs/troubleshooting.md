@@ -34,6 +34,11 @@ Grok Build works the same way with `.grok/config.toml` and `sema init --grok`:
 cat .grok/config.toml
 ```
 
+Cursor uses `.cursor/mcp.json` and `sema init --cursor`:
+```bash
+cat .cursor/mcp.json
+```
+
 **Step 2 — Reload VS Code**
 
 After registering, the AI extension needs a reload:
@@ -120,12 +125,12 @@ For Claude Code, check:
 cat your-project/CLAUDE.md
 ```
 
-For Codex, opencode, or Grok Build (all read `AGENTS.md`), check:
+For Codex, opencode, Grok Build, or Cursor (all read `AGENTS.md`), check:
 ```bash
 cat your-project/AGENTS.md
 ```
 
-If missing or not mentioning sema, add the template. See [Claude Code setup](claude-code.md), [OpenAI Codex setup](codex.md), [opencode setup](opencode.md), and [Grok Build setup](grok.md) for templates.
+If missing or not mentioning sema, add the template. See [Claude Code setup](claude-code.md), [OpenAI Codex setup](codex.md), [opencode setup](opencode.md), [Grok Build setup](grok.md), and [Cursor setup](cursor.md) for templates.
 
 > **Workspace note:** `CLAUDE.md` must be in each project's git root folder. A `CLAUDE.md` at the workspace parent directory is not read by Claude Code.
 

@@ -6,9 +6,9 @@
 # What it does:
 #   1. Ensures `uv` is available (bootstraps the official installer if missing).
 #   2. Installs the `sema` binary in an isolated tool environment (uv tool install).
-#   3. Detects which AI CLIs you have (Claude Code, Codex, opencode, Grok Build)
-#      and, if this is run inside an indexed project, registers sema with each
-#      via `sema setup`.
+#   3. Detects which AI clients you have (Claude Code, Codex, opencode, Grok Build,
+#      Cursor) and, if this is run inside an indexed project, registers sema with
+#      each via `sema setup`.
 #
 # Nothing here needs sudo. Everything installs under your home directory.
 #
@@ -17,6 +17,7 @@
 #   SEMA_SKIP_CODEX=1      don't register with Codex
 #   SEMA_SKIP_OPENCODE=1   don't register with opencode
 #   SEMA_SKIP_GROK=1       don't register with Grok Build
+#   SEMA_SKIP_CURSOR=1     don't register with Cursor
 #   SEMA_NO_SETUP=1        install the binary only; skip all registration
 #   SEMA_YES=1             assume "yes" to every prompt (non-interactive)
 #   SEMA_PACKAGE=<spec>    install source instead of PyPI's sema-mcp — e.g. a
@@ -110,19 +111,22 @@ if [ "${SEMA_NO_SETUP:-}" = "1" ]; then
   ok "Binary installed. Skipping registration (SEMA_NO_SETUP=1)."
 else
   say ""
-  say "${BOLD}Detected AI CLIs:${RESET}"
+  say "${BOLD}Detected AI clients:${RESET}"
   found_any=0
   for tool in claude codex opencode grok; do
     if have "$tool"; then ok "$tool"; found_any=1; else info "$tool ${DIM}(not installed)${RESET}"; fi
   done
+  # Cursor is a GUI editor, not a PATH CLI — its ~/.cursor dir is the presence signal.
+  if [ -d "$HOME/.cursor" ] || have cursor; then ok "cursor"; found_any=1; else info "cursor ${DIM}(not installed)${RESET}"; fi
 
   if [ "$found_any" = "0" ]; then
     say ""
-    warn "No AI CLIs found. Install any of these, then run ${BOLD}sema setup${RESET} in your project:"
+    warn "No AI clients found. Install any of these, then run ${BOLD}sema setup${RESET} in your project:"
     say "    ${DIM}Claude Code${RESET}  https://github.com/anthropics/claude-code"
     say "    ${DIM}Codex${RESET}        https://github.com/openai/codex"
     say "    ${DIM}opencode${RESET}     https://opencode.ai"
     say "    ${DIM}Grok Build${RESET}   https://x.ai/cli"
+    say "    ${DIM}Cursor${RESET}       https://cursor.com"
   elif [ -d ".sema/index" ]; then
     say ""
     if confirm "Register sema with the detected CLIs for this project?"; then

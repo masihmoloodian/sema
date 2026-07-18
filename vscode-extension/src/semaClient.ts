@@ -64,7 +64,7 @@ export interface StatusResult {
     changed_files?: number;
     deleted_files?: number;
   };
-  registration: { claude: boolean; codex: boolean; grok: boolean };
+  registration: { claude: boolean; codex: boolean; grok: boolean; cursor: boolean };
 }
 
 /**
@@ -233,8 +233,8 @@ export class SemaClient {
     this.worker = undefined;
   }
 
-  /** Register/unregister the MCP server (runs `sema init [--codex|--grok] [--uninstall]`). Returns CLI output. */
-  async register(target: 'claude' | 'codex' | 'grok', uninstall = false): Promise<string> {
+  /** Register/unregister the MCP server (runs `sema init [--codex|--grok|--cursor] [--uninstall]`). Returns CLI output. */
+  async register(target: 'claude' | 'codex' | 'grok' | 'cursor', uninstall = false): Promise<string> {
     const args = ['init'];
     if (target !== 'claude') {
       args.push(`--${target}`);  // sema's init flag is the target name; claude is the default

@@ -12,9 +12,9 @@ sema remove src/app.ts                        Remove a file from the index — d
 sema list                                     List indexed files and the symbols under each (--json for scripts)
 sema watch .                                  Watch for file changes and re-index automatically
 sema watch . --workspace my.code-workspace    Watch all workspace folders simultaneously
-sema setup                                    Detect installed AI CLIs and register sema with each in one shot
-sema setup --skip-codex                       Register all detected CLIs except Codex (also --skip-claude / --skip-opencode / --skip-grok)
-sema setup --uninstall                        Remove sema from every detected AI CLI
+sema setup                                    Detect installed AI clients and register sema with each in one shot
+sema setup --skip-codex                       Register all detected clients except Codex (also --skip-claude / --skip-opencode / --skip-grok / --skip-cursor)
+sema setup --uninstall                        Remove sema from every detected AI client
 sema update --check                           Show installed Claude Code, Codex, opencode, and Grok Build versions
 sema update                                   Run every installed coding agent's official self-updater
 sema update --provider codex                  Update one agent only (claude / codex / opencode / grok; repeatable)
@@ -27,6 +27,9 @@ sema init --codex --uninstall                 Remove sema from Codex config
 sema init --grok                              Register sema as MCP server with Grok Build (.grok/config.toml in project)
 sema init --grok --root ~/code                Multi-project registration for Grok Build
 sema init --grok --uninstall                  Remove sema from Grok Build config
+sema init --cursor                            Register sema as MCP server with Cursor (.cursor/mcp.json in project)
+sema init --cursor --root ~/code              Multi-project registration for Cursor
+sema init --cursor --uninstall                Remove sema from Cursor config
 sema search "query"                           Run a hybrid semantic+BM25 search (test without Claude)
 sema search "query" --top-k 10                Return more results
 sema search "query" --all-types               Include docs/config sections in results
@@ -43,12 +46,14 @@ sema serve --root ~/code                       Start MCP server for every indexe
 ## `sema setup` vs `sema init`
 
 `sema setup` is the one-command way to register sema: it detects which of
-**Claude Code**, **Codex**, **opencode**, and **Grok Build** are installed and
-wires sema into each. It's idempotent and safe to re-run. Skip a client with
-`--skip-claude`, `--skip-codex`, `--skip-opencode`, or `--skip-grok`.
+**Claude Code**, **Codex**, **opencode**, **Grok Build**, and **Cursor** are
+installed and wires sema into each. It's idempotent and safe to re-run. Skip a
+client with `--skip-claude`, `--skip-codex`, `--skip-opencode`, `--skip-grok`,
+or `--skip-cursor`.
 
-`sema init` registers a single client: `--claude` (the default), `--codex`, or
-`--grok`. It has no `--opencode` flag — use `sema setup` to reach opencode.
+`sema init` registers a single client: `--claude` (the default), `--codex`,
+`--grok`, or `--cursor`. It has no `--opencode` flag — use `sema setup` to reach
+opencode.
 
 Both accept `--root <dir>` (repeatable) to serve every indexed project beneath a
 directory at once. See [multi-project mode](multi-project.md).

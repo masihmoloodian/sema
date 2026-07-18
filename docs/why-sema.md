@@ -36,7 +36,7 @@ Your AI searches forever.
 measured savings on real open-source repos.
 
 **This works without the extension.** `sema setup` registers an MCP server with
-Claude Code, Codex, opencode, and Grok Build — no editor changes needed.
+Claude Code, Codex, opencode, Grok Build, and Cursor — no editor changes needed.
 
 ## The writing half — the reuse guard
 
@@ -50,7 +50,7 @@ already there instead of shipping a fourth function that does the same thing.
 ## The lock-in half — the extension
 
 The [VS Code extension](../vscode-extension/README.md) is a Cursor-style chat *and*
-agent that reads, edits, and runs your repo — with **eight engines in one
+agent that reads, edits, and runs your repo — with **nine engines in one
 conversation**:
 
 - **Local CLIs** — Claude Code, Codex, opencode, Grok Build. Reuse your existing login; no API

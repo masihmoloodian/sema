@@ -93,6 +93,10 @@ export class ManagePanel {
         description: status.registration.grok ? 'registered' : 'not registered',
       });
       items.push({
+        label: `$(${status.registration.cursor ? 'check' : 'dash'}) Cursor`,
+        description: status.registration.cursor ? 'registered' : 'not registered',
+      });
+      items.push({
         label: `$(${this.isWatching() ? 'eye' : 'eye-closed'}) Watch`,
         description: this.isWatching() ? 'on' : 'off',
       });
@@ -110,7 +114,7 @@ export class ManagePanel {
     }
 
     // ── Actions ──────────────────────────────────────────────────────────────
-    const reg = status?.registration ?? { claude: false, codex: false, grok: false };
+    const reg = status?.registration ?? { claude: false, codex: false, grok: false, cursor: false };
     items.push(sep('Actions'));
     items.push({ label: '$(database) Re-index', run: run('sema.manage.reindex') });
     items.push({ label: '$(debug-restart) Re-index (reset)', run: run('sema.manage.reindexReset') });
@@ -128,6 +132,11 @@ export class ManagePanel {
       reg.grok
         ? { label: '$(circle-slash) Unregister Grok Build', run: run('sema.manage.unregisterGrok') }
         : { label: '$(plug) Register with Grok Build', run: run('sema.manage.registerGrok') },
+    );
+    items.push(
+      reg.cursor
+        ? { label: '$(circle-slash) Unregister Cursor', run: run('sema.manage.unregisterCursor') }
+        : { label: '$(plug) Register with Cursor', run: run('sema.manage.registerCursor') },
     );
     items.push(
       this.isWatching()

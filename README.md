@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh
 ```bash
 cd your-project
 sema index .     # build the local semantic index
-sema setup       # register with every detected CLI: Claude Code, Codex, opencode, Grok Build
+sema setup       # register with every detected client: Claude Code, Codex, opencode, Grok Build, Cursor
 ```
 
 Keep the local coding-agent CLIs current so newly released models and effort
@@ -85,7 +85,7 @@ Sema indexes your code once, locally. Your assistant searches it instead — typ
 |---|---|
 | [Installation](docs/installation.md) | Platforms, requirements, install paths, from source |
 | [sema for VS Code](vscode-extension/README.md) | The extension — chat, agent, search, reuse |
-| [Claude Code](docs/claude-code.md) · [Codex](docs/codex.md) · [opencode](docs/opencode.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
+| [Claude Code](docs/claude-code.md) · [Codex](docs/codex.md) · [opencode](docs/opencode.md) · [Grok Build](docs/grok.md) · [Cursor](docs/cursor.md) · [VS Code workspace](docs/vscode-workspace.md) | Register sema with your assistant |
 | [Multiple projects](docs/multi-project.md) | Serve many repos from one registration |
 | [CLI reference](docs/cli-reference.md) | Every `sema` command |
 | [MCP tools](docs/mcp-tools.md) | The tools your AI assistant calls |

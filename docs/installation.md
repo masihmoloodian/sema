@@ -12,6 +12,7 @@ installer bootstraps one for you if you don't have it.
   - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or [Claude Code VS Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
   - [OpenAI Codex CLI](https://github.com/openai/codex) or [Codex VS Code extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt)
   - [opencode](opencode.md)
+  - [Grok Build](grok.md) or [Cursor](cursor.md)
   - or sema's own [VS Code extension](../vscode-extension/README.md)
 - No Docker, no external APIs, no GPU — everything runs on your machine
 
@@ -56,7 +57,7 @@ Then, inside each project:
 ```bash
 cd your-project
 sema index .     # build the local semantic index
-sema setup       # register with every detected CLI: Claude Code, Codex, opencode, Grok Build
+sema setup       # register with every detected client: Claude Code, Codex, opencode, Grok Build, Cursor
 ```
 
 Confirm with `sema --version`, and inside your editor type `/mcp` to see
@@ -139,4 +140,4 @@ sema --version
 
 ---
 
-Next: [Claude Code setup](claude-code.md) · [OpenAI Codex setup](codex.md) · [opencode setup](opencode.md) · [sema for VS Code](../vscode-extension/README.md)
+Next: [Claude Code setup](claude-code.md) · [OpenAI Codex setup](codex.md) · [opencode setup](opencode.md) · [Grok Build setup](grok.md) · [Cursor setup](cursor.md) · [sema for VS Code](../vscode-extension/README.md)

@@ -1,6 +1,6 @@
-"""Tests for the multi-client installer glue: opencode/grok config helpers and
-`sema setup`. These exercise config file round-trips and client detection
-without needing the real Claude/Codex/opencode/grok CLIs installed.
+"""Tests for the multi-client installer glue: opencode/grok/cursor config helpers
+and `sema setup`. These exercise config file round-trips and client detection
+without needing the real Claude/Codex/opencode/grok CLIs or Cursor installed.
 """
 
 import json
@@ -11,6 +11,8 @@ from click.testing import CliRunner
 from sema.cli import (
     main,
     _codex_config_add,
+    _cursor_config_add,
+    _cursor_config_remove,
     _grok_config_add,
     _opencode_config_add,
     _opencode_config_remove,
@@ -181,6 +183,141 @@ def test_init_grok_refuses_without_index(tmp_path, monkeypatch):
     assert not (tmp_path / ".grok").exists()
 
 
+# ── Cursor (.cursor/mcp.json, the .mcp.json standard shape) ───────────────────
+
+def test_cursor_add_writes_mcp_servers_shape(tmp_path):
+    changed, path = _cursor_config_add(tmp_path, roots=None)
+    assert changed is True
+    assert path == tmp_path / ".cursor" / "mcp.json"
+
+    entry = json.loads(path.read_text())["mcpServers"]["sema"]
+    # Cursor's stdio entry is {command: str, args: [...]} — command is NOT the
+    # combined [bin, ...args] array opencode uses, and no "type" key is needed.
+    assert isinstance(entry["command"], str)
+    assert entry["args"][:2] == ["serve", "--project"]
+    assert entry["args"][2] == str(tmp_path)
+    assert "type" not in entry
+
+
+def test_cursor_add_merges_without_clobbering(tmp_path):
+    cfg = tmp_path / ".cursor" / "mcp.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"mcpServers": {"linear": {"url": "https://mcp.linear.app/mcp"}}}))
+
+    assert _cursor_config_add(tmp_path, roots=None)[0] is True
+    servers = json.loads(cfg.read_text())["mcpServers"]
+    assert servers["linear"] == {"url": "https://mcp.linear.app/mcp"}  # user's server untouched
+    assert "sema" in servers
+
+
+def test_cursor_add_is_idempotent(tmp_path):
+    assert _cursor_config_add(tmp_path, roots=None)[0] is True
+    assert _cursor_config_add(tmp_path, roots=None)[0] is False  # already present
+
+
+def test_cursor_add_skips_malformed_config(tmp_path):
+    cfg = tmp_path / ".cursor" / "mcp.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("{not valid json")
+    assert _cursor_config_add(tmp_path, roots=None)[0] is False  # never clobber unparseable config
+
+
+def test_cursor_remove_leaves_other_servers(tmp_path):
+    cfg = tmp_path / ".cursor" / "mcp.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"mcpServers": {"linear": {"url": "x"}}}))
+    _cursor_config_add(tmp_path, roots=None)
+
+    assert _cursor_config_remove(cfg) is True
+    servers = json.loads(cfg.read_text())["mcpServers"]
+    assert "sema" not in servers and "linear" in servers
+
+
+def test_cursor_remove_drops_empty_mcp_servers(tmp_path):
+    _cursor_config_add(tmp_path, roots=None)
+    cfg = tmp_path / ".cursor" / "mcp.json"
+    assert _cursor_config_remove(cfg) is True
+    assert "mcpServers" not in json.loads(cfg.read_text())  # emptied block dropped
+
+
+def test_cursor_remove_missing_is_false(tmp_path):
+    assert _cursor_config_remove(tmp_path / ".cursor" / "mcp.json") is False
+
+
+def test_cursor_multi_project_serves_roots(tmp_path):
+    root = tmp_path / "work"
+    root.mkdir()
+    _cursor_config_add(tmp_path, roots=[root])
+    args = json.loads((tmp_path / ".cursor" / "mcp.json").read_text())["mcpServers"]["sema"]["args"]
+    assert "--root" in args and str(root) in args
+    assert "--project" not in args
+
+
+def test_setup_registers_cursor_when_detected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".sema" / "index").mkdir(parents=True)
+
+    import sema.cli as cli
+    # No CLIs on PATH; Cursor present via its detector.
+    monkeypatch.setattr(cli.shutil, "which", lambda n: None)
+    monkeypatch.setattr(cli, "_find_claude_bin", lambda: None)
+    monkeypatch.setattr(cli, "_cursor_installed", lambda: True)
+
+    result = CliRunner().invoke(main, ["setup"])
+    assert result.exit_code == 0
+    assert "sema" in json.loads((tmp_path / ".cursor" / "mcp.json").read_text())["mcpServers"]
+    # Cursor reads the shared .agents/skills path, so no separate skill copy.
+    assert (tmp_path / ".agents" / "skills" / "sema-code-navigation" / "SKILL.md").exists()
+
+
+def test_setup_cursor_skipped_when_not_installed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".sema" / "index").mkdir(parents=True)
+
+    import sema.cli as cli
+    monkeypatch.setattr(cli.shutil, "which", lambda n: None)
+    monkeypatch.setattr(cli, "_find_claude_bin", lambda: None)
+    monkeypatch.setattr(cli, "_cursor_installed", lambda: False)
+
+    result = CliRunner().invoke(main, ["setup"])
+    assert result.exit_code == 0
+    assert not (tmp_path / ".cursor").exists()  # not installed → not registered
+
+
+def test_setup_cursor_env_var_skip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".sema" / "index").mkdir(parents=True)
+    monkeypatch.setenv("SEMA_SKIP_CURSOR", "1")
+
+    import sema.cli as cli
+    monkeypatch.setattr(cli.shutil, "which", lambda n: None)
+    monkeypatch.setattr(cli, "_find_claude_bin", lambda: None)
+    monkeypatch.setattr(cli, "_cursor_installed", lambda: True)
+
+    result = CliRunner().invoke(main, ["setup"])
+    assert result.exit_code == 0
+    assert not (tmp_path / ".cursor").exists()  # skipped via env var
+
+
+def test_init_cursor_registers_and_uninstalls(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".sema" / "index").mkdir(parents=True)
+    cfg = tmp_path / ".cursor" / "mcp.json"
+
+    assert CliRunner().invoke(main, ["init", "--cursor"]).exit_code == 0
+    assert "sema" in json.loads(cfg.read_text())["mcpServers"]
+
+    assert CliRunner().invoke(main, ["init", "--cursor", "--uninstall"]).exit_code == 0
+    assert "mcpServers" not in json.loads(cfg.read_text())
+
+
+def test_init_cursor_refuses_without_index(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["init", "--cursor"])
+    assert "No index found" in result.output
+    assert not (tmp_path / ".cursor").exists()
+
+
 def test_setup_refuses_without_index(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["setup"])
@@ -191,13 +328,15 @@ def test_setup_honours_skip_flags(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".sema" / "index").mkdir(parents=True)
     result = CliRunner().invoke(
-        main, ["setup", "--skip-claude", "--skip-codex", "--skip-opencode", "--skip-grok"]
+        main,
+        ["setup", "--skip-claude", "--skip-codex", "--skip-opencode", "--skip-grok", "--skip-cursor"],
     )
     assert result.exit_code == 0
     assert "skipped" in result.output
     # Nothing registered because everything was skipped.
     assert not (tmp_path / "opencode.json").exists()
     assert not (tmp_path / ".grok").exists()
+    assert not (tmp_path / ".cursor").exists()
 
 
 def test_setup_registers_opencode_when_detected(tmp_path, monkeypatch):

@@ -354,6 +354,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('sema.manage.unregisterGrok', () =>
       runCli('sema: unregistering Grok Build…', (c) => c.register('grok', true), { toast: initToast }),
     ),
+    vscode.commands.registerCommand('sema.manage.registerCursor', () =>
+      runCli('sema: registering Cursor…', (c) => c.register('cursor', false), { toast: initToast }),
+    ),
+    vscode.commands.registerCommand('sema.manage.unregisterCursor', () =>
+      runCli('sema: unregistering Cursor…', (c) => c.register('cursor', true), { toast: initToast }),
+    ),
 
     vscode.commands.registerCommand('sema.manage.doctor', () =>
       runCli('sema: running doctor…', (c) => c.doctor(), { show: true }),

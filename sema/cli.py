@@ -90,6 +90,7 @@ def index(path: str, workspace: str | None, reset: bool, verbose: bool):
     from .indexer.chunker import index_project
     from .indexer.embedder import Embedder
     from .store.chroma import SemaStore
+    from .utils.gitignore import ensure_entry
 
     import datetime
     import importlib.metadata
@@ -165,6 +166,14 @@ def index(path: str, workspace: str | None, reset: bool, verbose: bool):
     meta_path.write_text(json.dumps(meta, indent=2))
 
     console.print(f"\n[green]✔[/green] Stored in {DEFAULT_INDEX_DIR}/")
+
+    # Keep the local index out of version control automatically.
+    ignored = ensure_entry(index_root, ".sema/")
+    if ignored == "created":
+        console.print("[green]✔[/green] Created [bold].gitignore[/bold] with [bold].sema/[/bold]")
+    elif ignored == "appended":
+        console.print("[green]✔[/green] Added [bold].sema/[/bold] to [bold].gitignore[/bold]")
+
     console.print("\nRun [bold]sema init[/bold] to register with Claude Code.")
 
 
@@ -366,15 +375,81 @@ def _opencode_config_remove(config_path: Path) -> bool:
     return True
 
 
+def _cursor_config_add(project_root: Path, roots: list[Path] | None = None) -> tuple[bool, Path]:
+    """Write mcpServers.sema into <project>/.cursor/mcp.json. Returns (changed, config_path).
+
+    Cursor uses the .mcp.json standard shape — a top-level "mcpServers" map whose stdio
+    entries are {command, args}. Cursor does support ${workspaceFolder} substitution, but
+    the absolute project path is baked in anyway to stay consistent with the other clients
+    and keep status/doctor able to introspect it; multi-project (--root) can't template it.
+    """
+    import sys
+    sema_bin = shutil.which("sema") or str(Path(sys.executable).parent / "sema")
+    config_path = project_root / ".cursor" / "mcp.json"
+
+    data: dict = {}
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return False, config_path  # don't clobber malformed user config
+
+    servers = data.setdefault("mcpServers", {})
+    if "sema" in servers:
+        return False, config_path  # already present
+
+    args = _serve_args(project_root, roots)
+    servers["sema"] = {"command": sema_bin, "args": args}
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+    return True, config_path
+
+
+def _cursor_config_remove(config_path: Path) -> bool:
+    """Remove mcpServers.sema from .cursor/mcp.json. Returns True if removed."""
+    if not config_path.exists():
+        return False
+    try:
+        data = json.loads(config_path.read_text())
+    except json.JSONDecodeError:
+        return False
+    if "sema" not in data.get("mcpServers", {}):
+        return False
+    del data["mcpServers"]["sema"]
+    if not data["mcpServers"]:
+        del data["mcpServers"]
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+    return True
+
+
+def _cursor_installed() -> bool:
+    """True if Cursor appears installed. Cursor is a GUI editor, not a PATH CLI, so its
+    presence is the ~/.cursor config dir (created on first run) rather than `which`.
+    An optional `cursor` shell shim, if the user installed one, also counts."""
+    return (Path.home() / ".cursor").is_dir() or shutil.which("cursor") is not None
+
+
+def _cursor_registered(config_path: Path) -> bool:
+    """True if .cursor/mcp.json exists and defines the sema MCP server."""
+    if not config_path.exists():
+        return False
+    try:
+        data = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    return "sema" in data.get("mcpServers", {})
+
+
 @main.command()
 @click.option("--uninstall", is_flag=True, help="Remove sema from the selected client")
 @click.option("--codex", "target", flag_value="codex", help="Register with OpenAI Codex")
 @click.option("--grok", "target", flag_value="grok", help="Register with Grok Build")
+@click.option("--cursor", "target", flag_value="cursor", help="Register with Cursor")
 @click.option("--claude", "target", flag_value="claude", default=True, help="Register with Claude Code (default)")
 @click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
               help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
 def init(uninstall: bool, target: str, roots: tuple[str, ...]):
-    """Register sema as an MCP server with Claude Code, OpenAI Codex, or Grok Build.
+    """Register sema as an MCP server with Claude Code, OpenAI Codex, Grok Build, or Cursor.
 
     Single-project by default (the current directory). Pass one or more --root
     directories to serve every indexed project found beneath them at once.
@@ -387,6 +462,8 @@ def init(uninstall: bool, target: str, roots: tuple[str, ...]):
         _init_codex(uninstall, project_root, index_path, root_paths)
     elif target == "grok":
         _init_grok(uninstall, project_root, index_path, root_paths)
+    elif target == "cursor":
+        _init_cursor(uninstall, project_root, index_path, root_paths)
     else:
         _init_claude(uninstall, project_root, index_path, root_paths)
 
@@ -529,23 +606,53 @@ def _init_grok(uninstall: bool, project_root: Path, index_path: Path, roots: lis
     console.print("then [bold]/mcps[/bold] to confirm. Check any time with: [bold]grok mcp doctor sema[/bold]")
 
 
+def _init_cursor(uninstall: bool, project_root: Path, index_path: Path, roots: list[Path]) -> None:
+    config_path = project_root / ".cursor" / "mcp.json"
+    if uninstall:
+        removed = _cursor_config_remove(config_path)
+        if removed:
+            console.print(f"[yellow]✔[/yellow] Removed sema from {config_path}")
+        else:
+            console.print(f"[yellow]–[/yellow] sema not found in {config_path}")
+        return
+
+    if roots:
+        _report_discovered(roots)
+    elif not index_path.exists():
+        console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
+        return
+
+    changed, config_path = _cursor_config_add(project_root, roots=roots or None)
+    if changed:
+        mode = "project scope, multi-project" if roots else "project scope"
+        console.print(f"[green]✔[/green] Registered as MCP server 'sema' ({mode})")
+        console.print(f"[dim]  {config_path}[/dim]")
+    else:
+        console.print(f"[yellow]–[/yellow] Already registered in {config_path}")
+    _install_navigation_skills(project_root, roots, {"cursor"})
+    console.print("\n[bold]Done.[/bold] Reload Cursor, then enable sema under")
+    console.print("[bold]Settings → MCP[/bold] (Cursor asks to approve a newly added server once).")
+
+
 @main.command()
 @click.option("--uninstall", is_flag=True, help="Remove sema from every detected AI CLI")
 @click.option("--skip-claude", is_flag=True, help="Do not touch Claude Code")
 @click.option("--skip-codex", is_flag=True, help="Do not touch OpenAI Codex")
 @click.option("--skip-opencode", is_flag=True, help="Do not touch opencode")
 @click.option("--skip-grok", is_flag=True, help="Do not touch Grok Build")
+@click.option("--skip-cursor", is_flag=True, help="Do not touch Cursor")
 @click.option("--root", "roots", multiple=True, type=click.Path(exists=True),
               help="Serve every indexed project under this directory (repeatable). Enables multi-project mode.")
 def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: bool,
-          skip_grok: bool, roots: tuple[str, ...]):
-    """Detect installed AI CLIs and register sema with each in one shot.
+          skip_grok: bool, skip_cursor: bool, roots: tuple[str, ...]):
+    """Detect installed AI clients and register sema with each in one shot.
 
     The one-command counterpart to `sema init`: instead of registering with a
-    single client, it discovers which of Claude Code, Codex, opencode, and Grok
-    Build are installed and wires sema into each. Idempotent and safe to re-run.
-    Skip any client with --skip-<name>; env vars SEMA_SKIP_CLAUDE / SEMA_SKIP_CODEX
-    / SEMA_SKIP_OPENCODE / SEMA_SKIP_GROK (set by the installer) are honoured too.
+    single client, it discovers which of Claude Code, Codex, opencode, Grok Build,
+    and Cursor are installed and wires sema into each. Idempotent and safe to re-run.
+    Skip any client with --skip-<name>; env vars SEMA_SKIP_CLAUDE / SEMA_SKIP_CODEX /
+    SEMA_SKIP_OPENCODE / SEMA_SKIP_GROK / SEMA_SKIP_CURSOR (set by the installer) are
+    honoured too.
     """
     import os
 
@@ -557,8 +664,9 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
     skip_codex = skip_codex or os.environ.get("SEMA_SKIP_CODEX") == "1"
     skip_opencode = skip_opencode or os.environ.get("SEMA_SKIP_OPENCODE") == "1"
     skip_grok = skip_grok or os.environ.get("SEMA_SKIP_GROK") == "1"
+    skip_cursor = skip_cursor or os.environ.get("SEMA_SKIP_CURSOR") == "1"
 
-    # Every project-scoped client (codex, opencode, grok) needs an index present
+    # Every project-scoped client (codex, opencode, grok, cursor) needs an index present
     # unless we're serving whole roots. Claude is user-scoped and checked the same way.
     if not uninstall and not root_paths and not index_path.exists():
         console.print("[red]✗[/red] No index found. Run [bold]sema index .[/bold] first.")
@@ -571,6 +679,7 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
     codex_bin = shutil.which("codex")
     opencode_bin = shutil.which("opencode")
     grok_bin = shutil.which("grok")
+    cursor_present = _cursor_installed()
 
     console.print()
     verb = "Removing" if uninstall else "Registering"
@@ -643,14 +752,30 @@ def setup(uninstall: bool, skip_claude: bool, skip_codex: bool, skip_opencode: b
             console.print(f"  Grok Build   {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
             skill_providers.add("grok")
 
+    # ── Cursor (project scope) ────────────────────────────────────────────────
+    if skip_cursor:
+        console.print("  Cursor       [dim]– skipped[/dim]")
+    elif not cursor_present:
+        console.print("  Cursor       [dim]– not installed[/dim]")
+    else:
+        any_client = True
+        cursor_cfg = project_root / ".cursor" / "mcp.json"
+        if uninstall:
+            removed = _cursor_config_remove(cursor_cfg)
+            console.print(f"  Cursor       {'[yellow]✔ removed[/yellow]' if removed else '[dim]– nothing to remove[/dim]'}")
+        else:
+            changed, _cfg = _cursor_config_add(project_root, roots=root_paths or None)
+            console.print(f"  Cursor       {'[green]✔ registered[/green]' if changed else '[yellow]– already present[/yellow]'}")
+            skill_providers.add("cursor")
+
     if not uninstall:
         _install_navigation_skills(project_root, root_paths, skill_providers)
 
     console.print()
     if not any_client and not uninstall:
-        console.print("[yellow]No supported AI CLIs detected.[/yellow] Install Claude Code, Codex, opencode, or Grok Build, then re-run [bold]sema setup[/bold].")
+        console.print("[yellow]No supported AI clients detected.[/yellow] Install Claude Code, Codex, opencode, Grok Build, or Cursor, then re-run [bold]sema setup[/bold].")
     elif not uninstall:
-        console.print("[bold]Done.[/bold] Run [bold]/mcp[/bold] in your AI CLI to confirm, or [bold]sema doctor[/bold] to diagnose.")
+        console.print("[bold]Done.[/bold] Run [bold]/mcp[/bold] in your AI client to confirm, or [bold]sema doctor[/bold] to diagnose.")
 
 
 @main.command()
@@ -939,6 +1064,7 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
 
     codex_registered = _toml_registered(project_root / ".codex" / "config.toml")
     grok_registered = _toml_registered(project_root / ".grok" / "config.toml")
+    cursor_registered = _cursor_registered(project_root / ".cursor" / "mcp.json")
 
     _emit_json({
         "index": index,
@@ -946,6 +1072,7 @@ def _emit_status_json(project_root: Path, meta_path: Path) -> None:
             "claude": claude_registered,
             "codex": codex_registered,
             "grok": grok_registered,
+            "cursor": cursor_registered,
         },
     })
 
@@ -1286,6 +1413,44 @@ def status(verbose: bool, as_json: bool):
     _print_toml_client("Codex       ", project_root / ".codex" / "config.toml", "--codex")
     _print_toml_client("Grok Build  ", project_root / ".grok" / "config.toml", "--grok")
 
+    # Cursor — same idea, JSON config (.cursor/mcp.json → mcpServers.sema).
+    def _print_cursor(label: str, config_path: Path) -> None:
+        flag = "--cursor"
+        fix = f"sema init {flag} --uninstall && sema init {flag}"
+        entry = None
+        if config_path.exists():
+            try:
+                entry = json.loads(config_path.read_text()).get("mcpServers", {}).get("sema")
+            except (json.JSONDecodeError, OSError):
+                entry = None
+        if not entry:
+            console.print(f"  {label} [dim]–[/dim] not registered — run: sema init {flag}")
+            return
+
+        args = entry.get("args", [])
+        served_roots = [args[i + 1] for i, a in enumerate(args) if a == "--root" and i + 1 < len(args)]
+        serving = None
+        if not served_roots and "--project" in args:
+            serving = args[args.index("--project") + 1] if args.index("--project") + 1 < len(args) else None
+
+        binary = entry.get("command", "")
+        if binary and not Path(binary).exists():
+            console.print(f"  {label} [red]✗ Failed[/red]")
+            console.print(f"  [dim]  Binary not found: {binary}[/dim]")
+            console.print(f"  [dim]  Fix: {fix}[/dim]")
+        else:
+            console.print(f"  {label} [green]✔ Connected[/green]")
+
+        if served_roots:
+            _print_serving_roots(served_roots, project_root)
+        else:
+            _print_serving(serving, project_root, fix)
+
+        if verbose:
+            console.print(f"  [dim]  config:  {config_path}[/dim]")
+
+    _print_cursor("Cursor      ", project_root / ".cursor" / "mcp.json")
+
     # Binary
     if verbose:
         console.print()
@@ -1548,8 +1713,46 @@ def doctor():
         ok = ok and client_ok
         warnings += client_warnings
 
-    # ── 7. Agent guidance ────────────────────────────────────────────────────
-    console.print("\n[bold]7. Agent guidance (skills / instruction files)[/bold]")
+    # ── 7. Cursor registration (JSON config) ─────────────────────────────────
+    console.print("\n[bold]7. Cursor registration[/bold]")
+    cursor_cfg = Path(".cursor/mcp.json")
+    console.print(f"  [dim]  config: {cursor_cfg.resolve()}[/dim]")
+    cursor_fix = "sema init --cursor --uninstall && sema init --cursor"
+    cursor_entry = None
+    if cursor_cfg.exists():
+        try:
+            cursor_entry = json.loads(cursor_cfg.read_text()).get("mcpServers", {}).get("sema")
+        except (json.JSONDecodeError, OSError):
+            cursor_entry = None
+    if not cursor_cfg.exists():
+        console.print("  [dim]–[/dim] No .cursor/mcp.json — run sema init --cursor if using Cursor")
+    elif not cursor_entry:
+        console.print("  [yellow]–[/yellow] .cursor/mcp.json exists but sema not registered")
+        console.print("  [dim]  Fix: sema init --cursor[/dim]")
+        warnings += 1
+    else:
+        reg_binary = cursor_entry.get("command", "")
+        reg_args = cursor_entry.get("args", [])
+        reg_project = reg_args[reg_args.index("--project") + 1] if "--project" in reg_args else None
+        if reg_binary:
+            console.print(f"  [dim]  binary:  {reg_binary}[/dim]")
+        if reg_project:
+            console.print(f"  [dim]  project: {reg_project}[/dim]")
+        if reg_binary and not Path(reg_binary).exists():
+            console.print(f"  [red]✗[/red] Registered binary does not exist: {reg_binary}")
+            console.print(f"  [dim]  Fix: {cursor_fix}[/dim]")
+            ok = False
+        else:
+            console.print("  [green]✔[/green] Registered and binary exists")
+        if reg_project and Path(reg_project).resolve() != project_root:
+            console.print("  [yellow]⚠[/yellow]  Registered project does not match cwd")
+            console.print(f"  [dim]     registered: {reg_project}[/dim]")
+            console.print(f"  [dim]     cwd:        {project_root}[/dim]")
+            console.print(f"  [dim]     Fix: {cursor_fix}[/dim]")
+            warnings += 1
+
+    # ── 8. Agent guidance ────────────────────────────────────────────────────
+    console.print("\n[bold]8. Agent guidance (skills / instruction files)[/bold]")
     claude_md = Path("CLAUDE.md")
     agents_md = Path("AGENTS.md")
     skill_files = [
@@ -1575,8 +1778,8 @@ def doctor():
         console.print("  [dim]  Run sema setup to install provider-specific navigation skills[/dim]")
         warnings += 1
 
-    # ── 8. Lingering processes ───────────────────────────────────────────────
-    console.print("\n[bold]8. Running processes[/bold]")
+    # ── 9. Lingering processes ───────────────────────────────────────────────
+    console.print("\n[bold]9. Running processes[/bold]")
     result = subprocess.run(["pgrep", "-f", "sema serve"], capture_output=True, text=True)
     pids = [p.strip() for p in result.stdout.splitlines() if p.strip()]
     if pids:
@@ -1584,8 +1787,8 @@ def doctor():
     else:
         console.print("  [dim]–[/dim] No sema serve process running (started on demand by AI tool)")
 
-    # ── 9. Index ─────────────────────────────────────────────────────────────
-    console.print("\n[bold]9. Index[/bold]")
+    # ── 10. Index ────────────────────────────────────────────────────────────
+    console.print("\n[bold]10. Index[/bold]")
     index_path = Path(".") / DEFAULT_INDEX_DIR
     meta_path = Path(".") / DEFAULT_META_FILE
     if index_path.exists():

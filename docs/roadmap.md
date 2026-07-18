@@ -34,7 +34,8 @@ providers). This roadmap tracks what's next.
 ## v1.0 — Public release
 - [x] Publish to PyPI (`sema-mcp`) with a `curl | sh` one-line installer
 - [x] Auto-detect and configure Grok Build (`sema init --grok`, `.grok/config.toml`, chat provider)
+- [x] Auto-detect and configure Cursor (`sema init --cursor`, `.cursor/mcp.json`)
 - [ ] Homebrew formula
-- [ ] Auto-detect and configure Cursor, Copilot, Windsurf
+- [ ] Auto-detect and configure Copilot, Windsurf
 - [ ] Token savings report after each index
 - [ ] CI/CD: auto-publish on git tag

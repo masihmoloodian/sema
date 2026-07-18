@@ -33,11 +33,12 @@ SEMA_SKIP_CLAUDE      Set to 1 to skip Claude Code during `sema setup`
 SEMA_SKIP_CODEX       Set to 1 to skip OpenAI Codex during `sema setup`
 SEMA_SKIP_OPENCODE    Set to 1 to skip opencode during `sema setup`
 SEMA_SKIP_GROK        Set to 1 to skip Grok Build during `sema setup`
+SEMA_SKIP_CURSOR      Set to 1 to skip Cursor during `sema setup`
 ```
 
-These mirror the `--skip-claude` / `--skip-codex` / `--skip-opencode` / `--skip-grok` flags and
-exist so the one-line installer can register only the clients you want. See the
-[CLI reference](cli-reference.md).
+These mirror the `--skip-claude` / `--skip-codex` / `--skip-opencode` / `--skip-grok` /
+`--skip-cursor` flags and exist so the one-line installer can register only the clients
+you want. See the [CLI reference](cli-reference.md).
 
 ## Where sema stores things
 

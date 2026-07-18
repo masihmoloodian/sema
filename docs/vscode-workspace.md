@@ -18,7 +18,7 @@ Paths in the index include the project folder name (`backend/src/auth.ts`, not j
 **2. Register with your AI CLI**
 
 ```bash
-sema setup            # registers every detected CLI (Claude Code, Codex, opencode, Grok Build)
+sema setup            # registers every detected client (Claude Code, Codex, opencode, Grok Build, Cursor)
 # or, Claude Code only:
 sema init --claude
 ```
