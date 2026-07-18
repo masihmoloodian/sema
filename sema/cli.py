@@ -36,7 +36,10 @@ def main():
 # is idempotent and preserves auth/config.
 _AGENT_CLIS = {
     "claude": {"binary": "claude", "install": "curl -fsSL https://claude.ai/install.sh | bash", "version": ["--version"], "label": "Claude Code"},
-    "codex": {"binary": "codex", "install": "curl -fsSL https://chatgpt.com/codex/install.sh | sh", "version": ["--version"], "label": "Codex"},
+    # CODEX_NON_INTERACTIVE skips the installer's "Start Codex now?" prompt (which reads
+    # /dev/tty and, when launched from `sema update`, exits 1 and fails the whole run).
+    # The env var must be set on the `sh` that runs the script, so it goes after the pipe.
+    "codex": {"binary": "codex", "install": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh", "version": ["--version"], "label": "Codex"},
     "opencode": {"binary": "opencode", "install": "curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash", "version": ["--version"], "label": "opencode"},
     "grok": {"binary": "grok", "install": "curl -fsSL https://x.ai/cli/install.sh | bash", "version": ["--version"], "label": "Grok Build"},
 }

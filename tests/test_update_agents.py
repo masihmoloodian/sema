@@ -58,6 +58,12 @@ def test_every_provider_has_a_curl_installer():
         assert "install" in spec["install"], name
 
 
+def test_codex_installer_is_non_interactive():
+    # Codex's script prompts "Start Codex now?" (reads /dev/tty); skip it so a run from
+    # the extension doesn't launch codex and fail with a non-zero exit.
+    assert "CODEX_NON_INTERACTIVE=1" in _AGENT_CLIS["codex"]["install"]
+
+
 def test_self_update_prefers_uv_tool(monkeypatch):
     monkeypatch.setattr("sema.cli.shutil.which", lambda name: "/bin/uv" if name == "uv" else None)
     calls = []
