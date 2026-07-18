@@ -3,6 +3,20 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.8.0]
+
+### Added
+- **"sema: Open Chat" command.** Reveal the chat sidebar from the command palette
+  (`Cmd/Ctrl+Shift+P` → **sema: Open Chat**), like Codex's "Open Codex Sidebar". Works
+  even before the panel has been opened.
+
+### Fixed
+- **Stop button now interrupts Codex Agent runs that are still starting up.** In Agent +
+  Approval mode, hitting Stop while the Codex app-server was in setup (`initialize` /
+  `thread-resume` / `turn-start`) left the request unsettled, so the run hung and the
+  spinner never stopped — most visible on a second message, which does a slower
+  `thread/resume`. The abort now rejects in-flight requests so the turn ends immediately.
+
 ## [0.7.0]
 
 ### Added
