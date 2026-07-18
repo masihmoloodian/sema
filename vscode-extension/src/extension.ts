@@ -289,7 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ],
         {
           title: 'Update coding-agent CLIs',
-          placeHolder: 'Runs each agent’s official updater in a terminal',
+          placeHolder: 'Re-runs each agent’s official install script in a terminal',
         },
       );
       if (!pick) return;

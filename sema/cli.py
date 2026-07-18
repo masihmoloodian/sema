@@ -30,11 +30,15 @@ def main():
     pass
 
 
+# Updates re-run each agent's official install script (the curl one-liner from its docs)
+# instead of the CLI's own self-updater — the self-updaters fail for some install methods,
+# which is the error users hit when updating from the extension. Re-running the installer
+# is idempotent and preserves auth/config.
 _AGENT_CLIS = {
-    "claude": {"binary": "claude", "update": ["update"], "version": ["--version"], "label": "Claude Code"},
-    "codex": {"binary": "codex", "update": ["update"], "version": ["--version"], "label": "Codex"},
-    "opencode": {"binary": "opencode", "update": ["upgrade"], "version": ["--version"], "label": "opencode"},
-    "grok": {"binary": "grok", "update": ["update"], "version": ["--version"], "label": "Grok Build"},
+    "claude": {"binary": "claude", "install": "curl -fsSL https://claude.ai/install.sh | bash", "version": ["--version"], "label": "Claude Code"},
+    "codex": {"binary": "codex", "install": "curl -fsSL https://chatgpt.com/codex/install.sh | sh", "version": ["--version"], "label": "Codex"},
+    "opencode": {"binary": "opencode", "install": "curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash", "version": ["--version"], "label": "opencode"},
+    "grok": {"binary": "grok", "install": "curl -fsSL https://x.ai/cli/install.sh | bash", "version": ["--version"], "label": "Grok Build"},
 }
 
 
@@ -50,9 +54,9 @@ _AGENT_CLIS = {
 def update_agents(providers: tuple[str, ...], check: bool) -> None:
     """Check or update supported coding-agent CLIs.
 
-    Uses each project's official self-updater: `claude update`, `codex update`,
-    `opencode upgrade`, and `grok update`. Authentication and configuration are
-    preserved.
+    Updates re-run each agent's official install script (the curl one-liner from its
+    docs) rather than the CLI's own self-updater, which errors for some install methods.
+    Authentication and configuration are preserved. `--check` just prints versions.
     """
     selected = providers or tuple(_AGENT_CLIS)
     failures = 0
@@ -65,10 +69,12 @@ def update_agents(providers: tuple[str, ...], check: bool) -> None:
             console.print(f"[dim]–[/dim] {label}: not installed")
             continue
         found += 1
-        args = spec["version"] if check else spec["update"]
-        if not check:
-            console.print(f"\n[bold]Updating {label}[/bold]")
-        result = subprocess.run([binary, *args], check=False)
+        if check:
+            result = subprocess.run([binary, *spec["version"]], check=False)
+        else:
+            console.print(f"\n[bold]Updating {label}[/bold]  [dim]{spec['install']}[/dim]")
+            # The official installer pipes curl into a shell, so run it through one.
+            result = subprocess.run(spec["install"], shell=True, check=False)
         if result.returncode != 0:
             failures += 1
             console.print(f"[red]✗[/red] {label}: command exited {result.returncode}")
