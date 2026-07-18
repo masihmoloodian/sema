@@ -8,9 +8,9 @@ This project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 - **Update sema from the extension.** A new **"Update sema"** action — in the Manage panel
   and the command palette (`sema: Update sema`) — upgrades the sema CLI / MCP server
-  (`sema-mcp`) to its latest release (`uv tool upgrade` → pipx → pip, matching how it was
-  installed); reload VS Code afterward to load it. Pairs with sema-mcp 0.7.0, which adds
-  the underlying `sema self-update` command.
+  (`sema-mcp`) to its latest release via `uv tool upgrade sema-mcp` (or `pipx upgrade`),
+  matching how the one-liner installs it. Reload VS Code afterward to load it. Runs the
+  package upgrade directly, so it works regardless of the installed sema version.
 
 ### Changed
 - **Update agent CLIs** now re-runs each agent's official install script (`curl … | sh`)
