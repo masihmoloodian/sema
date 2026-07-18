@@ -1522,3 +1522,139 @@ export class GrokProvider extends CliProvider {
     return o?.type === 'error' ? o.message ?? 'Grok Build returned an error.' : null;
   }
 }
+
+/**
+ * Cursor's headless agent CLI (`cursor-agent`) in print mode. The prompt is the trailing
+ * positional the base class appends; `-p --output-format stream-json` makes it emit
+ * newline-delimited events (`system`/init, `assistant`, `tool_call`, `result`), each
+ * carrying `session_id`. Auth reuses the user's Cursor login (`cursor-agent login`).
+ *
+ * Two documented limits shape this provider: reasoning is suppressed in print mode, and
+ * the stream reports no token usage or cost — so `extractThinking`/`extractUsage` return
+ * null. Model ids come from `cursor-agent --list-models`; `auto` is Cursor's own router.
+ */
+export class CursorProvider extends CliProvider {
+  readonly id = 'cursor';
+  readonly label = 'Cursor (local)';
+  // `auto` is Cursor's router (the CLI default) and always valid; the rest are common
+  // aliases — confirm the live set with `cursor-agent --list-models`. "+ custom id…"
+  // reaches anything else an account exposes.
+  readonly modelInfos: ModelInfo[] = [
+    { id: 'auto', name: 'Auto (Cursor picks)', recommended: true },
+    { id: 'sonnet-4.5', name: 'Claude Sonnet 4.5' },
+    { id: 'sonnet-4.5-thinking', name: 'Claude Sonnet 4.5 (thinking)' },
+    { id: 'opus-4.1', name: 'Claude Opus 4.1' },
+    { id: 'gpt-5', name: 'GPT-5' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  ];
+  readonly defaultModel = 'auto';
+  // No `efforts`: cursor-agent exposes no reasoning-effort flag.
+  readonly modelHint = 'auto — run `cursor-agent --list-models` to list your account’s models';
+  readonly auth = { login: ['login'], logout: ['logout'], status: ['status'] };
+
+  /**
+   * Text only. cursor-agent's headless mode documents no image/pdf attachment path, and
+   * claiming vision would turn an attachment into a silent "I can't see it" reply. Text
+   * inlines into the prompt, so it works regardless.
+   */
+  accepts(): readonly AttachmentKind[] {
+    return ['text'];
+  }
+
+  protected buildInvocation(opts: StreamOptions): { bin: string; args: string[]; prompt: string } {
+    const args = ['-p', '--output-format', 'stream-json'];
+    if (opts.cwd) {
+      args.push('--workspace', opts.cwd);
+    }
+    if (opts.sessionId) {
+      // Optional-value flag, so pass the id explicitly — otherwise it would swallow the
+      // trailing prompt positional as the chat id.
+      args.push('--resume', opts.sessionId);
+    }
+    if (opts.model && opts.model !== 'default') {
+      args.push('--model', opts.model);
+    }
+    if (opts.agent) {
+      // Agent mode: auto-approve edits/commands, or a headless run blocks on approval.
+      // Ask/Plan stay unforced. cursor-agent has no read-only sandbox flag, so read-only
+      // is best-effort — the inlined sema context asks it not to modify files.
+      args.push('--force');
+    }
+    // cursor-agent has no system-prompt channel, so the context inlines into the prompt
+    // (like Codex/opencode). Resume sends only the new user turn; the session holds the rest.
+    const atts = attachmentsFor(opts);
+    const prompt = opts.sessionId
+      ? opts.messages[opts.messages.length - 1]?.content ?? ''
+      : flattenPrompt(opts.system, opts.messages);
+    return { bin: 'cursor-agent', args, prompt: promptOrDefault(prompt, atts) };
+  }
+
+  protected extractDelta(event: unknown): string | null {
+    const o = event as { type?: string; message?: { content?: Array<{ type?: string; text?: string }> } };
+    // Each `assistant` event is a complete message chunk between tool calls; the chunks
+    // don't overlap, so appending each reconstructs the answer. The terminal `result`
+    // event repeats the full text and is deliberately NOT read here (that would double it).
+    if (o?.type === 'assistant' && Array.isArray(o.message?.content)) {
+      const text = o.message.content
+        .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text)
+        .join('');
+      return text || null;
+    }
+    return null;
+  }
+
+  protected extractThinking(): string | null {
+    // cursor-agent suppresses reasoning in print mode — none is emitted.
+    return null;
+  }
+
+  protected extractActivities(event: unknown): Activity[] {
+    const o = event as {
+      type?: string;
+      subtype?: string;
+      call_id?: string;
+      tool_call?: Record<string, { args?: Record<string, unknown> }>;
+    };
+    // Report on `started` only; `completed` repeats the same call_id and would double it.
+    if (o?.type !== 'tool_call' || o.subtype !== 'started' || !o.tool_call) {
+      return [];
+    }
+    const key = Object.keys(o.tool_call)[0];
+    if (!key) {
+      return [];
+    }
+    const args = o.tool_call[key]?.args ?? {};
+    const detail = String(
+      args.path ?? args.relativeWorkspacePath ?? args.command ?? args.pattern ?? '',
+    ).slice(0, 60);
+    // `readToolCall` → `Read`, `shellToolCall` → `Shell`, etc.
+    const bare = key.replace(/ToolCall$/, '');
+    const tool = bare ? bare.charAt(0).toUpperCase() + bare.slice(1) : 'Tool';
+    return [{ id: o.call_id, tool, detail }];
+  }
+
+  protected extractSession(event: unknown): string | null {
+    const o = event as { session_id?: string };
+    return typeof o?.session_id === 'string' ? o.session_id : null;
+  }
+
+  protected extractModel(event: unknown): string | null {
+    // The system/init event names the resolved model.
+    const o = event as { type?: string; model?: string };
+    return o?.type === 'system' && typeof o.model === 'string' ? o.model : null;
+  }
+
+  protected extractUsage(): TokenUsage | null {
+    // cursor-agent's stream-json reports no token usage or cost.
+    return null;
+  }
+
+  protected checkError(event: unknown): string | null {
+    const o = event as { type?: string; is_error?: boolean; result?: unknown };
+    if (o?.type === 'result' && o.is_error) {
+      return typeof o.result === 'string' && o.result ? o.result : 'Cursor Agent returned an error.';
+    }
+    return null;
+  }
+}

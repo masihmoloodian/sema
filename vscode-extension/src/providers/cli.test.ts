@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   ClaudeCodeProvider,
   CodexProvider,
+  CursorProvider,
   GrokProvider,
   OpenCodeProvider,
   isClaudeProtectedTool,
@@ -23,6 +24,9 @@ class InspectOpenCode extends OpenCodeProvider {
   invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
 }
 class InspectGrok extends GrokProvider {
+  invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
+}
+class InspectCursor extends CursorProvider {
   invocation(opts: StreamOptions) { return this.buildInvocation(opts); }
 }
 
@@ -259,6 +263,65 @@ test('Grok passes the prompt to -p and gates tools by mode', () => {
   });
   assert.deepEqual(resumed.args.slice(resumed.args.indexOf('-r'), resumed.args.indexOf('-r') + 2), ['-r', 'sess-1']);
   assert.equal(resumed.prompt, 'second');
+});
+
+test('Cursor stream-json reports answer, tools, session, and model', async () => {
+  const cli = await fakeCli([
+    { type: 'system', subtype: 'init', session_id: 'cursor-session', model: 'gpt-5', cwd: '/workspace', permissionMode: 'default' },
+    { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'Where is auth handled?' }] }, session_id: 'cursor-session' },
+    { type: 'tool_call', subtype: 'started', call_id: 'call-1', tool_call: { readToolCall: { args: { path: 'auth.ts' } } }, session_id: 'cursor-session' },
+    { type: 'tool_call', subtype: 'completed', call_id: 'call-1', tool_call: { readToolCall: { args: { path: 'auth.ts' }, result: { success: {} } } }, session_id: 'cursor-session' },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] }, session_id: 'cursor-session' },
+    { type: 'result', subtype: 'success', is_error: false, result: 'answer', session_id: 'cursor-session' },
+  ]);
+  const state = options(cli);
+  await new CursorProvider().stream(state.opts);
+  // The terminal `result` repeats the full answer; it must not be counted a second time.
+  assert.deepEqual(state.deltas, ['answer']);
+  assert.deepEqual(state.thinking, []); // reasoning is suppressed in print mode
+  assert.deepEqual(state.activities, ['Read:auth.ts']); // `completed` reuses call-1 and is skipped
+  assert.deepEqual(state.sessions, ['cursor-session']);
+  assert.deepEqual(state.models, ['gpt-5']);
+  assert.deepEqual(state.usage, []); // cursor-agent reports no token usage or cost
+});
+
+test('Cursor surfaces a failed result', async () => {
+  const cli = await fakeCli([
+    { type: 'system', subtype: 'init', session_id: 's', model: 'auto' },
+    { type: 'result', subtype: 'error', is_error: true, result: 'Not authenticated. Run cursor-agent login.', session_id: 's' },
+  ]);
+  const state = options(cli);
+  await assert.rejects(
+    new CursorProvider().stream({ ...state.opts, onModel: undefined }),
+    /Not authenticated/,
+  );
+});
+
+test('Cursor passes the prompt as the positional and gates edits by mode', () => {
+  const provider = new InspectCursor();
+  const base = { ...baseOptions(), model: 'auto', cwd: '/workspace' };
+
+  // Ask/Plan (read-only): no --force, context inlined into the prompt.
+  const ask = provider.invocation({ ...base, agent: false });
+  assert.equal(ask.bin, 'cursor-agent');
+  assert.deepEqual(ask.args, ['-p', '--output-format', 'stream-json', '--workspace', '/workspace', '--model', 'auto']);
+  assert.equal(ask.prompt, 'system\n\n--- End of context. Reply to the request below. ---\n\nhello');
+
+  // Agent mode auto-approves edits.
+  assert.ok(provider.invocation({ ...base, agent: true }).args.includes('--force'));
+
+  // Resume sends only the newest user turn and passes the id explicitly.
+  const resume = provider.invocation({
+    ...base,
+    sessionId: 'sess-1',
+    messages: [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+      { role: 'user', content: 'c' },
+    ],
+  });
+  assert.equal(resume.args[resume.args.indexOf('--resume') + 1], 'sess-1');
+  assert.equal(resume.prompt, 'c');
 });
 
 test('sign-in state is read from each CLI real output', () => {

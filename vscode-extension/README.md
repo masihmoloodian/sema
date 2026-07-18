@@ -56,22 +56,23 @@ You need **one**, and you can switch any time — even mid-conversation.
 panel → **Set key** → paste. Keys live in VS Code SecretStorage, never in
 settings. OpenRouter is one gateway to models from many providers.
 
-**B · Reuse a local CLI** — no key management at all; Claude Code, Codex, and
-Grok Build use your existing subscription, opencode works with any provider you
-sign into.
+**B · Reuse a local CLI** — no key management at all; Claude Code, Codex, Grok
+Build, and Cursor use your existing subscription, opencode works with any
+provider you sign into.
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash         # Claude Code
 curl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex
 curl -fsSL https://opencode.ai/install | bash          # opencode
 curl -fsSL https://x.ai/cli/install.sh | bash          # Grok Build
+curl https://cursor.com/install -fsS | bash            # Cursor Agent
 ```
 
 Then click **Log in** on that provider in the panel — it runs the CLI's own
 sign-in. Install only what you'll use. If a CLI isn't on VS Code's PATH, set
 `sema.chat.claudePath` / `sema.chat.codexPath` / `sema.chat.opencodePath` /
-`sema.chat.grokPath`.
-Setup guides: [Claude Code](../docs/claude-code.md) · [Codex](../docs/codex.md) · [opencode](../docs/opencode.md) · [Grok Build](../docs/grok.md).
+`sema.chat.grokPath` / `sema.chat.cursorPath`.
+Setup guides: [Claude Code](../docs/claude-code.md) · [Codex](../docs/codex.md) · [opencode](../docs/opencode.md) · [Grok Build](../docs/grok.md) · [Cursor](../docs/cursor.md).
 
 If the selected provider can't answer yet — no API key, or not signed in — the panel
 header says so and doubles as the shortcut to fix it.
@@ -179,9 +180,10 @@ so the agent greps and reads files like any other assistant.
   agents still read raw files themselves. Images and PDFs can't be scrubbed, so with
   **redact** on, attaching one is refused rather than sent unscrubbed.
 - **Manage** — index status, chunk/file counts, model, last-updated time, index
-  path, the sema binary in use, CLI registration, a file **watch** toggle, and the
-  session's **token usage and estimated cost**. One-click: Re-index, Re-index
-  (reset), register/unregister, watch, doctor, and **Update agent CLIs**.
+  path, the sema binary in use, client registration (Claude Code, Codex, Grok Build,
+  Cursor), a file **watch** toggle, and the session's **token usage and estimated
+  cost**. One-click: Re-index, Re-index (reset), register/unregister, watch, doctor,
+  and **Update agent CLIs**.
 - **Search** (`sema: Search code`) — semantic search; click a result to jump to the
   definition.
 - **Reuse** (`sema: Check reuse`) — describe what you're about to build; sema says

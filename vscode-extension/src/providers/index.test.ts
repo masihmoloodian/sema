@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildSystem, SEMA_WORKFLOW } from '../semaWorkflow';
 import { PROVIDERS } from './index';
 
-test('all nine providers receive the shared sema workflow', () => {
+test('all ten providers receive the shared sema workflow', () => {
   assert.deepEqual(
     PROVIDERS.map((provider) => provider.id),
     [
@@ -11,6 +11,7 @@ test('all nine providers receive the shared sema workflow', () => {
       'codex',
       'opencode',
       'grok',
+      'cursor',
       'anthropic',
       'openai',
       'deepseek',

@@ -478,6 +478,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (provider.id === 'grok') {
       return cfg.get<string>('chat.grokPath') || 'grok';
     }
+    if (provider.id === 'cursor') {
+      return cfg.get<string>('chat.cursorPath') || 'cursor-agent';
+    }
     return provider.id;
   }
 
@@ -1204,6 +1207,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       cliBin = cfg.get<string>('chat.opencodePath');
     } else if (provider.id === 'grok') {
       cliBin = cfg.get<string>('chat.grokPath');
+    } else if (provider.id === 'cursor') {
+      cliBin = cfg.get<string>('chat.cursorPath');
     }
 
     // A provider/model/mode switch keeps the sema transcript but starts a compatible

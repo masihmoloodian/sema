@@ -3,6 +3,23 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.7.0]
+
+### Added
+- **Cursor as a local CLI chat provider.** Drives Cursor's headless agent (`cursor-agent`)
+  in print mode (`--output-format stream-json`), streaming the answer, tool activity, and
+  session resume, with **Sign in / Sign out** in the model menu like the other local CLIs.
+  Pick **Cursor (local)** in the provider picker; set `sema.chat.cursorPath` if
+  `cursor-agent` isn't on VS Code's PATH. Models come from `cursor-agent --list-models`
+  (`auto` is Cursor's own router). Two deliberate gaps mirror the CLI: reasoning is
+  suppressed in print mode, and the stream reports no token usage or cost.
+- **Register sema with Cursor from the Manage panel.** The Manage panel shows Cursor's
+  registration status alongside Claude Code, Codex, and Grok Build, with one-click
+  **Register with Cursor** / **Unregister Cursor** (writes `.cursor/mcp.json` in the
+  workspace, which Cursor reads), so a project you also open in Cursor gets sema's tools
+  there too. This is separate from the chat provider above: the provider chats *with*
+  Cursor's agent; this registers sema's tools *inside* Cursor.
+
 ## [0.6.0]
 
 ### Added
