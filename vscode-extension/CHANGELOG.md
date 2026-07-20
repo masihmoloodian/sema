@@ -3,6 +3,21 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.10.0]
+
+### Added
+- **DevOps guard tools available in "Reuse a local CLI" mode.** Claude Code,
+  Codex, Grok Build, and Cursor now expose `devops_plan`/`devops_run`/
+  `devops_approve`/`devops_deny`/`devops_pending`/`devops_log` — an
+  analyze-first gate for `kubectl`/Terraform/AWS CLI/Helm that classifies
+  every command as safe, needs-approval, or prohibited before anything
+  executes, with secret redaction on both the command and its output. These
+  tools live in the `sema-mcp` MCP server (`sema-mcp` 0.9.0+, see
+  [docs/devops-guard.md](../docs/devops-guard.md)), so no extension code
+  changed — they just show up once the underlying `sema` install is current.
+  Not yet available in "Bring an API key" mode, which uses its own fixed
+  tool list rather than MCP discovery.
+
 ## [0.9.0]
 
 ### Added
