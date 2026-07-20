@@ -21,6 +21,7 @@ Sema is a **VS Code extension**, an **agentic assistant**, and a **semantic inde
 - **Agent permission controls** let Claude Code and Codex pause protected actions for
   an inline **Allow/Reject** decision in the Sema chat, or use their clearly marked bypass mode in a
   trusted sandbox. Each provider keeps its own permission choice.
+- **DevOps guard** lets your AI provider run real infra commands — `kubectl`, Terraform, AWS CLI, Helm — safely. Every command is classified (safe / needs-approval / prohibited) and secret-redacted *before* it runs, never after; mutating actions are held until you explicitly approve them, and irreversible ones are refused outright, no exceptions ([see docs](docs/devops-guard.md)).
 
 Sema uses **your existing Claude Code and Codex subscription** — no extra API key, no re-login. Or bring your own key for any API provider.
 
@@ -89,6 +90,7 @@ Sema indexes your code once, locally. Your assistant searches it instead — typ
 | [Multiple projects](docs/multi-project.md) | Serve many repos from one registration |
 | [CLI reference](docs/cli-reference.md) | Every `sema` command |
 | [MCP tools](docs/mcp-tools.md) | The tools your AI assistant calls |
+| [DevOps guard](docs/devops-guard.md) | Analyze-first gate for `kubectl`/Terraform/AWS CLI/Helm — safe/needs-approval/prohibited tiers, secret redaction |
 | [Supported languages](docs/languages.md) | AST-aware vs text-aware indexing |
 | [Configuration](docs/configuration.md) | Config file, env vars, `.gitignore` |
 | [Managing sema](docs/managing-sema.md) | Update, remove, and when to re-index |

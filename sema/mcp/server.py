@@ -5,6 +5,7 @@ from .tools import mcp, init_tools, set_registry
 from .registry import ProjectRegistry
 from ..store.chroma import SemaStore
 from ..indexer.embedder import Embedder
+from . import devops_tools  # noqa: F401 — side-effect import, registers devops_* tools on `mcp`
 
 
 def serve(project_root: Path, index_path: Path) -> None:

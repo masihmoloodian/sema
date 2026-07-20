@@ -1866,3 +1866,244 @@ def doctor():
         console.print(f"[yellow]⚠  No errors, but {warnings} warning(s) — see above.[/yellow]")
     else:
         console.print("[red]✗ Issues found — see above.[/red]")
+
+
+# ── devops guard ──────────────────────────────────────────────────────────
+# Analyze-first execution gate for infra commands (terraform/aws/kubectl/helm).
+# See docs/devops-guard-plan.md. Every command is classified and redacted
+# before it is allowed to run, held for approval, or refused — never after.
+
+@click.group()
+def devops():
+    """Analyze-first gate for infra commands (terraform/aws/kubectl/helm).
+
+    Classifies every command as safe (runs now), needs-approval (held until
+    you consent), or prohibited (refused outright) — before it ever executes.
+    See docs/devops-guard-plan.md.
+    """
+    pass
+
+
+main.add_command(devops)
+
+
+def _devops_root() -> Path:
+    return Path.cwd()
+
+
+def _split_command(cmd: tuple[str, ...]) -> list[str]:
+    """Accept either a single quoted string ("kubectl get pods -A") or a raw
+    argv list (kubectl get pods -A), and always return argv.
+
+    A single string is parsed with shlex so a literal `--` inside it (e.g.
+    `kubectl exec pod -- sh`) survives — click's own argument parser treats a
+    bare `--` token as its own end-of-options marker and silently drops it,
+    which would otherwise corrupt commands that rely on that separator.
+    """
+    import shlex
+
+    if len(cmd) == 1 and (" " in cmd[0] or "\t" in cmd[0]):
+        return shlex.split(cmd[0])
+    return list(cmd)
+
+
+@devops.command(name="plan", context_settings={"ignore_unknown_options": True})
+@click.argument("cmd", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_plan_cmd(cmd: tuple[str, ...], as_json: bool):
+    """Classify a command and show its redacted preview — nothing executes.
+
+    CMD can be given unquoted (sema devops plan kubectl get pods -A) or as a
+    single quoted string (sema devops plan "kubectl exec pod -- sh") — quote
+    it when the command itself contains a `--` separator.
+    """
+    from .devops import gate
+
+    result = gate.plan(_split_command(cmd))
+    if as_json:
+        _emit_json(result)
+        return
+    color = {"safe": "green", "approve": "yellow", "prohibited": "red"}[result["tier"]]
+    console.print(f"[{color}]{result['tier'].upper()}[/{color}]  {result['command']}")
+    console.print(f"[dim]{result['reason']}[/dim]")
+
+
+@devops.command(name="run", context_settings={"ignore_unknown_options": True})
+@click.argument("cmd", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_run_cmd(cmd: tuple[str, ...], as_json: bool):
+    """Analyze, then act: run now (safe), hold for consent (approve), or refuse (prohibited).
+
+    CMD can be given unquoted (sema devops run kubectl get pods -A) or as a
+    single quoted string (sema devops run "kubectl exec pod -- sh") — quote
+    it when the command itself contains a `--` separator.
+    """
+    import sys
+    from .devops import gate
+
+    result = gate.run(_split_command(cmd), _devops_root())
+
+    # Exit code reflects the outcome even in --json mode, so scripts/CI
+    # chaining on `$?` see prohibited/held/failed the same as a human would.
+    if result["outcome"] == "prohibited":
+        exit_code = 1
+    elif result["outcome"] == "held":
+        exit_code = 2  # distinct from a real failure — nothing ran, a human needs to decide
+    else:
+        exit_code = result["exit_code"]
+
+    if as_json:
+        _emit_json(result)
+        sys.exit(exit_code)
+
+    if result["outcome"] == "prohibited":
+        console.print(f"[red]✗ REFUSED[/red]  {result['command']}")
+        console.print(f"[dim]{result['reason']}[/dim]")
+        console.print(result["message"])
+    elif result["outcome"] == "held":
+        console.print(f"[yellow]⚠ HELD FOR APPROVAL[/yellow]  {result['command']}")
+        console.print(f"[dim]{result['reason']}[/dim]")
+        console.print(result["message"])
+    else:
+        status = "[green]✔[/green]" if result["exit_code"] == 0 else f"[red]✗ (exit {result['exit_code']})[/red]"
+        console.print(f"{status}  {result['command']}")
+        if result["stdout"]:
+            console.print(result["stdout"])
+        if result["stderr"]:
+            console.print(f"[red]{result['stderr']}[/red]")
+    sys.exit(exit_code)
+
+
+@devops.command(name="approve")
+@click.argument("action_id")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_approve_cmd(action_id: str, as_json: bool):
+    """Approve a held action by id and execute it."""
+    import sys
+    from .devops import gate
+
+    result = gate.approve(action_id, _devops_root())
+    if result["outcome"] == "error":
+        if as_json:
+            _emit_json(result)
+            sys.exit(1)
+        raise click.ClickException(result["message"])
+
+    if as_json:
+        _emit_json(result)
+        sys.exit(result["exit_code"])
+
+    status = "[green]✔[/green]" if result["exit_code"] == 0 else f"[red]✗ (exit {result['exit_code']})[/red]"
+    console.print(f"{status}  {result['command']}")
+    if result["stdout"]:
+        console.print(result["stdout"])
+    if result["stderr"]:
+        console.print(f"[red]{result['stderr']}[/red]")
+    sys.exit(result["exit_code"])
+
+
+@devops.command(name="deny")
+@click.argument("action_id")
+@click.option("--reason", default=None, help="Why this action was denied (goes in the audit log)")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_deny_cmd(action_id: str, reason: str | None, as_json: bool):
+    """Deny a held action by id. Nothing executes."""
+    from .devops import gate
+
+    result = gate.deny(action_id, _devops_root(), reason=reason)
+    if as_json:
+        _emit_json(result)
+        return
+    if result["outcome"] == "error":
+        raise click.ClickException(result["message"])
+    console.print(f"[dim]Denied:[/dim] {result['command']}")
+
+
+@devops.command(name="pending")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_pending_cmd(as_json: bool):
+    """List actions currently held for approval."""
+    from .devops import gate
+
+    rows = gate.pending_actions(_devops_root())
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        console.print("[dim]No actions pending approval.[/dim]")
+        return
+    for r in rows:
+        console.print(f"[yellow]{r['id']}[/yellow]  {r['command']}")
+        console.print(f"  [dim]{r['reason']}[/dim]")
+
+
+@devops.command(name="log")
+@click.option("--limit", default=50, help="Max entries to show")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON")
+def devops_log_cmd(limit: int, as_json: bool):
+    """Show the redacted audit trail of everything the gate has decided."""
+    from .devops import gate
+
+    rows = gate.audit_log(_devops_root(), limit=limit)
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        console.print("[dim]No devops activity logged yet.[/dim]")
+        return
+    outcome_color = {"ran": "green", "held": "yellow", "denied": "dim", "prohibited": "red"}
+    for r in rows:
+        color = outcome_color.get(r["outcome"], "white")
+        console.print(f"[{color}]{r['outcome']:>10}[/{color}]  {r['command']}")
+        console.print(f"  [dim]{r['reason']}[/dim]")
+
+
+@devops.command(name="install-shims")
+@click.option("--dir", "shim_dir", default=None, help="Where to install shims (default: ~/.sema/shims)")
+@click.option("--bins", default="kubectl,terraform,aws,helm", help="Comma-separated binaries to shim")
+def devops_install_shims_cmd(shim_dir: str | None, bins: str):
+    """Install PATH shims so gated binaries route through the guard even from a raw shell tool.
+
+    Prepend the printed directory to PATH (e.g. in your shell rc or the AI
+    provider's environment) so `terraform`/`aws`/`kubectl`/`helm` always pass
+    through `sema devops run` first, regardless of which tool an AI provider
+    used to invoke them. See docs/devops-guard-plan.md, "Making the gate
+    actually unbypassable".
+    """
+    from .devops.shims import install_shims
+
+    target_dir = Path(shim_dir).expanduser() if shim_dir else Path.home() / ".sema" / "shims"
+    installed = install_shims(target_dir, [b.strip() for b in bins.split(",") if b.strip()])
+    console.print(f"[green]✔[/green] Installed {len(installed)} shim(s) in [bold]{target_dir}[/bold]")
+    for name, real in installed.items():
+        console.print(f"  [dim]{name} → {real}[/dim]")
+    console.print(f"\nAdd this to PATH ahead of the real binaries:\n  export PATH=\"{target_dir}:$PATH\"")
+
+
+@devops.command(name="guard-shim", hidden=True, context_settings={"ignore_unknown_options": True})
+@click.argument("real_bin")
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def devops_guard_shim_cmd(real_bin: str, args: tuple[str, ...]):
+    """Internal: invoked by installed PATH shims, not meant to be run by hand."""
+    import sys
+    from .devops import gate
+
+    argv = [real_bin] + [a for a in args if a != "--"]
+
+    def _confirm(message: str) -> bool:
+        console.print(f"[yellow]{message}[/yellow]")
+        return click.confirm("", default=False)
+
+    result = gate.run_interactive(argv, _devops_root(), _confirm)
+    if result["outcome"] == "prohibited":
+        console.print(f"[red]✗ REFUSED[/red]  {result['command']}")
+        console.print(f"[dim]{result['reason']}[/dim]")
+        sys.exit(1)
+    if result["outcome"] == "denied":
+        console.print("[dim]Denied — nothing executed.[/dim]")
+        sys.exit(1)
+    if result["stdout"]:
+        click.echo(result["stdout"], nl=False)
+    if result["stderr"]:
+        click.echo(result["stderr"], nl=False, err=True)
+    sys.exit(result["exit_code"])
