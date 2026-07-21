@@ -3,6 +3,14 @@
 All notable changes to the **sema** VS Code extension are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.11.0]
+
+### Changed
+- **The repository moved to [github.com/get-sema/sema](https://github.com/get-sema/sema).**
+  Every link in the README and docs now points at the new home.
+- Rewritten README and refreshed Marketplace listing. No extension code
+  changed in this release; the version tracks `sema-mcp` 0.11.0.
+
 ## [0.10.0]
 
 ### Added
