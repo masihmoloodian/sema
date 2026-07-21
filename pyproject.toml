@@ -39,6 +39,12 @@ dependencies = [
 pii = [
     "spacy>=3.7",
 ]
+# The terminal app (`sema chat`). Kept optional so the MCP server stays lean.
+chat = [
+    "textual>=0.80",
+    "anthropic>=0.40",
+    "openai>=1.40",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

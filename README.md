@@ -61,6 +61,17 @@ Reload VS Code after an update so its model picker reflects the installed CLI.
 
 Want **just the extension** or **just the index**? Both work standalone. Plus manual installs, requirements, and troubleshooting — **for more details see the [Installation guide](docs/installation.md)**.
 
+**4. Or skip the editor entirely** — `sema chat` is a full coding agent in your terminal, with the same modes, providers, and tools as the extension:
+
+```bash
+uv sync --extra chat      # or: pip install 'sema-mcp[chat]'
+sema chat                 # interactive TUI
+sema chat --print "where is auth handled?"   # one-shot, for scripts
+```
+
+Sessions are shared with the VS Code extension, so a conversation started in the
+editor resumes in the terminal and back. **[Terminal app guide →](docs/terminal-app.md)**
+
 📦 **[sema-mcp on PyPI](https://pypi.org/project/sema-mcp/)** · 🧩 **[Extension on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MasihMoloodian.sema-codebase-chat)**
 
 ## Why

@@ -2107,3 +2107,107 @@ def devops_guard_shim_cmd(real_bin: str, args: tuple[str, ...]):
     if result["stderr"]:
         click.echo(result["stderr"], nl=False, err=True)
     sys.exit(result["exit_code"])
+
+
+@main.command()
+@click.argument("prompt", required=False)
+@click.option("--root", default=None, type=click.Path(exists=True),
+              help="Project root (default: nearest indexed ancestor of the cwd)")
+@click.option("--provider", default=None,
+              help="Provider id; defaults to your last pick, else claude-code")
+@click.option("--model", default="", help="Model id; defaults to the provider's own default")
+@click.option("--mode", default=None, type=click.Choice(["ask", "plan", "agent"]),
+              help="ask = chat only, plan = read-only + plan artifact, agent = full tools")
+@click.option("--resume", "session_id", default=None, help="Resume a saved session by id")
+@click.option("--yes", is_flag=True, help="Auto-approve every tool call (unattended runs)")
+@click.option("--print", "print_mode", is_flag=True,
+              help="Run one prompt headlessly and print the answer — no TUI")
+def chat(prompt: str | None, root: str | None, provider: str | None, model: str,
+         mode: str | None, session_id: str | None, yes: bool, print_mode: bool):
+    """Open the sema terminal app — a coding agent over the semantic index."""
+    import sys
+
+    from .agent import ops
+
+    project_root = Path(root).resolve() if root else ops.find_project_root()
+
+    if print_mode or (prompt and not sys.stdin.isatty()):
+        _chat_headless(project_root, prompt or "", provider, model,
+                       mode or "agent", session_id, yes)
+        return
+
+    try:
+        from .tui.app import SemaChatApp
+    except ImportError:
+        console.print(
+            "[red]✗[/red] The terminal app needs extra packages. Install them with:\n"
+            "    [bold]uv sync --extra chat[/bold]   (or: pip install 'sema-mcp[chat]')"
+        )
+        sys.exit(1)
+
+    app = SemaChatApp(
+        root=project_root, provider_id=provider, model=model, mode=mode,
+        session_id=session_id, yes=yes,
+    )
+    app.run()
+
+
+def _chat_headless(root: Path, prompt: str, provider_id: str | None, model: str,
+                   mode: str, session_id: str | None, yes: bool) -> None:
+    """One prompt, one answer, no UI — for scripts and CI."""
+    import asyncio
+    import sys
+
+    from .agent import ops
+    from .agent.loop import Agent, AgentConfig
+    from .agent.permissions import PermissionManager, auto_allow, default_policies
+    from .agent import prefs as agent_prefs
+    from .agent.providers import get_provider
+    from .agent.session import Session, SessionStore
+
+    if not prompt.strip() and not sys.stdin.isatty():
+        prompt = sys.stdin.read()
+    if not prompt.strip():
+        console.print("[red]✗[/red] --print needs a prompt argument or stdin.")
+        sys.exit(1)
+
+    ops.silence_progress_bars()
+    notice = ops.bind_index(root)
+    if notice:
+        console.print(f"[yellow]![/yellow] {notice}")
+
+    saved = agent_prefs.load(None)
+    provider = get_provider(provider_id or saved.provider)
+    store = SessionStore(None, str(root))
+    session = (store.load(session_id) if session_id else None) or Session.create(
+        provider.id, model or saved.model or provider.default_model, mode
+    )
+    if session.model not in {m.id for m in provider.models}:
+        session.model = provider.default_model
+    # Headless runs are unattended: without --yes the gate has no UI to ask, so
+    # every mutating call would be denied. Fail loudly instead of silently.
+    permissions = auto_allow() if yes else PermissionManager(policies=default_policies())
+    agent = Agent(
+        AgentConfig(
+            root=root, provider=provider, model=session.model, mode=mode,
+            effort=session.effort, permissions=permissions,
+            use_index=ops.has_index(root),
+        ),
+        session,
+        store.attachments_dir(session.id),
+    )
+
+    async def go() -> None:
+        from .agent.loop import Notice, TextDelta, ToolStarted
+
+        async for event in agent.run_turn(prompt):
+            if isinstance(event, TextDelta):
+                click.echo(event.text, nl=False)
+            elif isinstance(event, ToolStarted):
+                click.echo(f"\n[{event.name}] {event.summary}", err=True)
+            elif isinstance(event, Notice):
+                click.echo(event.text, err=True)
+        click.echo("")
+
+    asyncio.run(go())
+    store.save(session)
