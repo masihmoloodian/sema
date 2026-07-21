@@ -11,7 +11,7 @@ project uses [uv](https://docs.astral.sh/uv/) for environment and dependency
 management.
 
 ```bash
-git clone https://github.com/masihmoloodian/sema.git
+git clone https://github.com/get-sema/sema.git
 cd sema
 
 # Create the virtual environment

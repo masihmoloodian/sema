@@ -49,7 +49,7 @@ One line — installs the `sema` command (bootstrapping `uv` and a Python for it
 needed), then offers to register with whichever AI CLIs you have:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh
 ```
 
 Then, inside each project:
@@ -66,12 +66,12 @@ Confirm with `sema --version`, and inside your editor type `/mcp` to see
 Skip any client with an env var (they pass cleanly through `curl | sh`):
 
 ```bash
-SEMA_SKIP_CODEX=1 curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
+SEMA_SKIP_CODEX=1 curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh
 ```
 
 `SEMA_SKIP_CLAUDE`, `SEMA_SKIP_CODEX`, `SEMA_SKIP_OPENCODE`, `SEMA_YES=1`
 (non-interactive), and `SEMA_NO_SETUP=1` (binary only) are all honoured. The
-installer is [install.sh](https://github.com/masihmoloodian/sema/blob/main/install.sh) — read it first if you like.
+installer is [install.sh](https://github.com/get-sema/sema/blob/main/install.sh) — read it first if you like.
 
 ## Install manually
 
@@ -103,7 +103,7 @@ sema init --claude           # or --codex
 
 ```bash
 # 1. Clone to wherever you want
-git clone https://github.com/masihmoloodian/sema.git
+git clone https://github.com/get-sema/sema.git
 cd sema
 
 # 2. Create a virtual environment and install
@@ -124,7 +124,7 @@ sema --version
 ### Using pip
 
 ```bash
-git clone https://github.com/masihmoloodian/sema.git
+git clone https://github.com/get-sema/sema.git
 cd sema
 
 python3 -m venv .venv

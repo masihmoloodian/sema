@@ -19,7 +19,7 @@ want the chat panel (see [Just the chat panel](#just-the-chat-panel)).
 This is the indexer — what makes chat codebase-aware.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh
 sema --version                                          # verify
 ```
 
@@ -228,7 +228,7 @@ those CLIs. Restart active agent sessions and reload VS Code when they finish.
 The index stands alone. `sema setup` registers an MCP server with Claude Code,
 Codex, and opencode, so your CLI assistant gets `search_code`, `check_reuse`, and
 `impact_analysis` with no editor involved. See the
-[root README](https://github.com/masihmoloodian/sema).
+[root README](https://github.com/get-sema/sema).
 
 ## Build from source
 
