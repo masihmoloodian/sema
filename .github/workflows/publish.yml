@@ -9,7 +9,7 @@ name: Publish to PyPI
 #
 # One-time setup on PyPI (pypi.org -> sema-mcp -> Settings -> Publishing):
 #   add a GitHub trusted publisher with
-#     owner=masihmoloodian, repo=sema, workflow=publish.yml, environment=pypi
+#     owner=get-sema, repo=sema, workflow=publish.yml, environment=pypi
 
 on:
   push:

@@ -1,7 +1,7 @@
 #!/bin/sh
-# sema installer — https://github.com/masihmoloodian/sema
+# sema installer — https://github.com/get-sema/sema
 #
-#   curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh
 #
 # What it does:
 #   1. Ensures `uv` is available (bootstraps the official installer if missing).

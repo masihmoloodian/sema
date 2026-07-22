@@ -54,7 +54,7 @@ else
   cat <<EOF
 
 Tagged vscode-$NEW. The Marketplace publish runs in CI (needs the VSCE_PAT secret):
-  https://github.com/masihmoloodian/sema/actions
+  https://github.com/get-sema/sema/actions
 Or upload vscode-extension/sema-codebase-chat-$VER.vsix manually at
   https://marketplace.visualstudio.com/manage/publishers/MasihMoloodian
 EOF
