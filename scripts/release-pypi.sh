@@ -58,6 +58,6 @@ git push origin "v$VERSION"
 cat <<EOF
 
 Released v$VERSION. Track it here:
-  https://github.com/masihmoloodian/sema/actions
+  https://github.com/get-sema/sema/actions
   https://pypi.org/project/sema-mcp/
 EOF

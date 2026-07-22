@@ -13,7 +13,7 @@ export const openrouterProvider = new OpenAICompatibleProvider({
   label: 'OpenRouter',
   baseURL: 'https://openrouter.ai/api/v1',
   headers: {
-    'HTTP-Referer': 'https://github.com/masihmoloodian/sema',
+    'HTTP-Referer': 'https://github.com/get-sema/sema',
     'X-Title': 'sema',
   },
   secretKey: 'sema.apiKey.openrouter',

@@ -317,7 +317,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('sema.manage.copyInstall', async () => {
       const cmd =
-        'curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh';
+        'curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh';
       await vscode.env.clipboard.writeText(cmd);
       const pick = await vscode.window.showInformationMessage(
         'Install command copied. Paste it into a terminal (macOS / Linux), then reload the window.',
@@ -327,11 +327,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (pick === 'Open Terminal') {
         vscode.window.createTerminal('sema install').show();
       } else if (pick === 'Install guide') {
-        vscode.env.openExternal(vscode.Uri.parse('https://github.com/masihmoloodian/sema#install'));
+        vscode.env.openExternal(
+          vscode.Uri.parse('https://github.com/get-sema/sema/blob/main/docs/installation.md'),
+        );
       }
     }),
     vscode.commands.registerCommand('sema.manage.openInstallDocs', () =>
-      vscode.env.openExternal(vscode.Uri.parse('https://github.com/masihmoloodian/sema#install')),
+      vscode.env.openExternal(
+        vscode.Uri.parse('https://github.com/get-sema/sema/blob/main/docs/installation.md'),
+      ),
     ),
 
     vscode.commands.registerCommand('sema.manage.reindex', () =>

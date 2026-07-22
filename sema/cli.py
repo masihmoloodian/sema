@@ -116,7 +116,7 @@ def self_update() -> None:
     if result.returncode != 0:
         raise click.ClickException(
             f"Update failed (exit {result.returncode}). Re-run the installer:\n"
-            "  curl -fsSL https://raw.githubusercontent.com/masihmoloodian/sema/main/install.sh | sh"
+            "  curl -fsSL https://raw.githubusercontent.com/get-sema/sema/main/install.sh | sh"
         )
     console.print(
         "\n[green]✔[/green] sema updated. Reload the sema extension (or restart your "

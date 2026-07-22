@@ -58,8 +58,8 @@ dev = [
 sema = "sema.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/masihmoloodian/sema"
-Issues = "https://github.com/masihmoloodian/sema/issues"
+Homepage = "https://github.com/get-sema/sema"
+Issues = "https://github.com/get-sema/sema/issues"
 
 [build-system]
 requires = ["hatchling"]
